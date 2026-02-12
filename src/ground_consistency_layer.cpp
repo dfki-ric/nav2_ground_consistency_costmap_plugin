@@ -261,16 +261,17 @@ void GroundConsistencyLayer::updateCosts(
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  // 1) Integrate latest frame counts into persistent world scores
   integrateFrameCountsIntoScores();
 
   const double res = getResolution();
   const float gd = static_cast<float>(ground_decay_);
   const float nd = static_cast<float>(nonground_decay_);
-  const float gth = static_cast<float>(ground_free_thresh_);
-  const float oth = static_cast<float>(nonground_occ_thresh_);
 
-  // 2) Compute current rolling window bounds in WORLD (global_frame_)
+  // Optional hard obstacle thresholds (keep your existing params)
+  const float oth = static_cast<float>(nonground_occ_thresh_);
+  const float eps = 1e-5f;
+
+  // Rolling window bounds in world
   double min_wx, min_wy, max_wx, max_wy;
   master_grid.mapToWorld(min_i, min_j, min_wx, min_wy);
   master_grid.mapToWorld(max_i, max_j, max_wx, max_wy);
@@ -278,106 +279,86 @@ void GroundConsistencyLayer::updateCosts(
   if (min_wx > max_wx) std::swap(min_wx, max_wx);
   if (min_wy > max_wy) std::swap(min_wy, max_wy);
 
-  // Small pad so edge quantization doesn't miss cells
-  min_wx -= res;
-  min_wy -= res;
-  max_wx += res;
-  max_wy += res;
+  // pad by one cell
+  min_wx -= res; min_wy -= res;
+  max_wx += res; max_wy += res;
 
-  // Helper: world cell (xi,yi) -> world cell center
   auto cellCenter = [&](int32_t xi, int32_t yi, double & wx, double & wy) {
     wx = (static_cast<double>(xi) + 0.5) * res;
     wy = (static_cast<double>(yi) + 0.5) * res;
   };
 
-  // 3) Decay + apply decision by iterating WORLD evidence keys that fall in window
-  //    To avoid double-writing, we do it in two passes:
-  //    A) decay ground + maybe mark FREE
-  //    B) decay nonground + override with LETHAL if needed
-
-  // --- A) Ground pass (decay + FREE)
+  // --- 1) Decay both maps (within window) + erase tiny entries
   for (auto it = ground_score_world_.begin(); it != ground_score_world_.end(); ) {
-    const int32_t xi = unpackX(it->first);
-    const int32_t yi = unpackY(it->first);
-
     double wx, wy;
-    cellCenter(xi, yi, wx, wy);
+    cellCenter(unpackX(it->first), unpackY(it->first), wx, wy);
+    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) { ++it; continue; }
 
-    // Keep map small: decay even outside window? optional.
-    // Here: only process those that intersect current rolling window.
-    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) {
-      ++it;
-      continue;
-    }
-
-    // Decay
     it->second *= gd;
-    if (it->second < 1e-3f) {
-      it = ground_score_world_.erase(it);
-      continue;
-    }
-
-    // Project to current costmap indices
-    unsigned int mx, my;
-    if (master_grid.worldToMap(wx, wy, mx, my)) {
-      if (static_cast<int>(mx) >= min_i && static_cast<int>(mx) < max_i &&
-          static_cast<int>(my) >= min_j && static_cast<int>(my) < max_j)
-      {
-        // Only set FREE if we don't have strong nonground later.
-        // We'll potentially override in the nonground pass.
-        if (it->second >= gth) {
-          master_grid.setCost(mx, my, nav2_costmap_2d::FREE_SPACE);
-        }
-      }
-    }
-
-    ++it;
+    if (it->second < 1e-3f) it = ground_score_world_.erase(it);
+    else ++it;
   }
 
-  // --- B) Nonground pass (decay + LETHAL override)
   for (auto it = nonground_score_world_.begin(); it != nonground_score_world_.end(); ) {
-    const int32_t xi = unpackX(it->first);
-    const int32_t yi = unpackY(it->first);
+    double wx, wy;
+    cellCenter(unpackX(it->first), unpackY(it->first), wx, wy);
+    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) { ++it; continue; }
+
+    it->second *= nd;
+    if (it->second < 1e-3f) it = nonground_score_world_.erase(it);
+    else ++it;
+  }
+
+  // --- 2) Iterate union of keys in-window and compute p_occ
+  // We'll build a temporary set of keys (cheap enough for your window sizes).
+  std::unordered_map<WorldKey, uint8_t> costs;
+  costs.reserve(4096);
+
+  auto add_key = [&](WorldKey k) {
+    const int32_t xi = unpackX(k);
+    const int32_t yi = unpackY(k);
+
+    double wx, wy;
+    cellCenter(xi, yi, wx, wy);
+    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) return;
+
+    float g = 0.0f;
+    float ng = 0.0f;
+
+    if (auto itg = ground_score_world_.find(k); itg != ground_score_world_.end()) g = itg->second;
+    if (auto itn = nonground_score_world_.find(k); itn != nonground_score_world_.end()) ng = itn->second;
+
+    const float denom = ng + g + eps;
+    const float p_occ = ng / denom;                  // 0..1
+    uint8_t cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
+
+    // Optional: hard lethal if very confident obstacle
+    if (ng >= oth && p_occ > 0.75f) {
+      cost = nav2_costmap_2d::LETHAL_OBSTACLE;
+    }
+
+    costs[k] = cost;
+  };
+
+  for (const auto & kv : ground_score_world_)   add_key(kv.first);
+  for (const auto & kv : nonground_score_world_) add_key(kv.first);
+
+  // --- 3) Write costs into master grid
+  for (const auto & kv : costs) {
+    const int32_t xi = unpackX(kv.first);
+    const int32_t yi = unpackY(kv.first);
 
     double wx, wy;
     cellCenter(xi, yi, wx, wy);
 
-    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) {
-      ++it;
-      continue;
-    }
-
-    // Decay
-    it->second *= nd;
-    if (it->second < 1e-3f) {
-      it = nonground_score_world_.erase(it);
-      continue;
-    }
-
     unsigned int mx, my;
-    if (master_grid.worldToMap(wx, wy, mx, my)) {
-      if (static_cast<int>(mx) >= min_i && static_cast<int>(mx) < max_i &&
-          static_cast<int>(my) >= min_j && static_cast<int>(my) < max_j)
-      {
-        if (it->second >= oth) {
-          // Override anything (including FREE) with obstacle
-          master_grid.setCost(mx, my, nav2_costmap_2d::LETHAL_OBSTACLE);
-        } else {
-          // If uncertain and you want safety, set unknown-as-occupied here ONLY IF
-          // no FREE has been set. But you can't easily know what other layers do.
-          // Leave it alone; your original behavior of writing full window lethal
-          // is extremely aggressive in a multi-layer stack.
-        }
-      }
-    }
+    if (!master_grid.worldToMap(wx, wy, mx, my)) continue;
+    if ((int)mx < min_i || (int)mx >= max_i || (int)my < min_j || (int)my >= max_j) continue;
 
-    ++it;
+    master_grid.setCost(mx, my, kv.second);
   }
-
-  // 4) Important: DO NOT overwrite unknowns for the whole window here.
-  // Let other layers (static/obstacle/inflation) contribute. Your previous
-  // "unknown_as_occupied" for every cell tends to destroy the stack when rolling.
 }
+
 
 
 }  // namespace nav2_ground_consistency_costmap_plugin
