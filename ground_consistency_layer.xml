@@ -1,0 +1,10 @@
+<library path="nav2_ground_consistency_costmap_plugin">
+  <class
+    name="nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer"
+    type="nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer"
+    base_class_type="nav2_costmap_2d::Layer">
+    <description>
+      Clears occupied cells if point evidence exists.
+    </description>
+  </class>
+</library>
