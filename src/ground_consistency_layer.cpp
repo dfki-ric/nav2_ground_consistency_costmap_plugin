@@ -52,6 +52,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".nonground_decay", nonground_decay_);
   node->get_parameter(name_ + ".ground_free_thresh", ground_free_thresh_);
   node->get_parameter(name_ + ".nonground_occ_thresh", nonground_occ_thresh_);
+  node->get_parameter(name_ + ".nonground_prob_thresh", nonground_prob_thresh_);
   node->get_parameter(name_ + ".max_score", max_score_);
   node->get_parameter(name_ + ".unknown_as_occupied", unknown_as_occupied_);
 
@@ -253,6 +254,7 @@ void GroundConsistencyLayer::updateCosts(
 
   // Optional hard obstacle thresholds (keep your existing params)
   const float oth = static_cast<float>(nonground_occ_thresh_);
+  const float pth = static_cast<float>(nonground_prob_thresh_);
   const float eps = 1e-5f;
 
   // Rolling window bounds in world
@@ -317,7 +319,7 @@ void GroundConsistencyLayer::updateCosts(
     uint8_t cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
 
     // Optional: hard lethal if very confident obstacle
-    if (ng >= oth && p_occ > 0.75f) {
+    if (ng >= oth && p_occ > pth) {
       cost = nav2_costmap_2d::LETHAL_OBSTACLE;
     }
 
