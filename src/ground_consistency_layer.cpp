@@ -272,8 +272,8 @@ void GroundConsistencyLayer::updateCosts(
 
   // 2) Compute current rolling window bounds in WORLD (global_frame_)
   double min_wx, min_wy, max_wx, max_wy;
-  mapToWorld(min_i, min_j, min_wx, min_wy);
-  mapToWorld(max_i, max_j, max_wx, max_wy);
+  master_grid.mapToWorld(min_i, min_j, min_wx, min_wy);
+  master_grid.mapToWorld(max_i, max_j, max_wx, max_wy);
 
   if (min_wx > max_wx) std::swap(min_wx, max_wx);
   if (min_wy > max_wy) std::swap(min_wy, max_wy);
@@ -319,7 +319,7 @@ void GroundConsistencyLayer::updateCosts(
 
     // Project to current costmap indices
     unsigned int mx, my;
-    if (worldToMap(wx, wy, mx, my)) {
+    if (master_grid.worldToMap(wx, wy, mx, my)) {
       if (static_cast<int>(mx) >= min_i && static_cast<int>(mx) < max_i &&
           static_cast<int>(my) >= min_j && static_cast<int>(my) < max_j)
       {
@@ -355,7 +355,7 @@ void GroundConsistencyLayer::updateCosts(
     }
 
     unsigned int mx, my;
-    if (worldToMap(wx, wy, mx, my)) {
+    if (master_grid.worldToMap(wx, wy, mx, my)) {
       if (static_cast<int>(mx) >= min_i && static_cast<int>(mx) < max_i &&
           static_cast<int>(my) >= min_j && static_cast<int>(my) < max_j)
       {
