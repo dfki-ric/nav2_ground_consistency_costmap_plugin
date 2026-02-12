@@ -42,10 +42,6 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("max_score", rclcpp::ParameterValue(1000.0));
   declareParameter("unknown_as_occupied", rclcpp::ParameterValue(true));
 
-  declareParameter("use_z_filter", rclcpp::ParameterValue(false));
-  declareParameter("ground_max_z", rclcpp::ParameterValue(0.20));
-  declareParameter("nonground_min_z", rclcpp::ParameterValue(0.05));
-
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
   node->get_parameter(name_ + ".tf_timeout", tf_timeout_);
@@ -58,10 +54,6 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".nonground_occ_thresh", nonground_occ_thresh_);
   node->get_parameter(name_ + ".max_score", max_score_);
   node->get_parameter(name_ + ".unknown_as_occupied", unknown_as_occupied_);
-
-  node->get_parameter(name_ + ".use_z_filter", use_z_filter_);
-  node->get_parameter(name_ + ".ground_max_z", ground_max_z_);
-  node->get_parameter(name_ + ".nonground_min_z", nonground_min_z_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
@@ -180,10 +172,6 @@ void GroundConsistencyLayer::groundCloudCallback(
 
     tf2::doTransform(ps, pg, tf);
 
-    if (use_z_filter_ && pg.point.z > ground_max_z_) {
-      continue;
-    }
-
     const double res = getResolution();
     local_counts[worldKey(pg.point.x, pg.point.y, res)] += 1u;
   }
@@ -224,10 +212,6 @@ void GroundConsistencyLayer::nongroundCloudCallback(
     ps.point.z = *iter_z;
 
     tf2::doTransform(ps, pg, tf);
-
-    if (use_z_filter_ && pg.point.z < nonground_min_z_) {
-      continue;
-    }
 
     const double res = getResolution();
     local_counts[worldKey(pg.point.x, pg.point.y, res)] += 1u;

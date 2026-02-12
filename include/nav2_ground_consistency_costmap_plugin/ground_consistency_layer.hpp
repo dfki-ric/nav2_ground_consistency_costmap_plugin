@@ -81,11 +81,6 @@ private:
   double max_score_{1000.0};     // clamp to avoid overflow
   bool unknown_as_occupied_{true}; // safety default when uncertain
 
-  // Optional Z filters
-  bool use_z_filter_{false};
-  double ground_max_z_{0.20};      // only accept ground points below this (in global_frame)
-  double nonground_min_z_{0.05};   // only accept nonground above this
-
   // TF
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
