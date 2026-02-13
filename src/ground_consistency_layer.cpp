@@ -278,8 +278,10 @@ void GroundConsistencyLayer::updateCosts(
   for (auto it = ground_score_world_.begin(); it != ground_score_world_.end(); ) {
     double wx, wy;
     cellCenter(unpackX(it->first), unpackY(it->first), wx, wy);
-    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) { ++it; continue; }
-
+    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) {
+      it = ground_score_world_.erase(it);
+      continue; 
+    }
     it->second *= gd;
     if (it->second < 1e-3f) it = ground_score_world_.erase(it);
     else ++it;
@@ -288,7 +290,10 @@ void GroundConsistencyLayer::updateCosts(
   for (auto it = nonground_score_world_.begin(); it != nonground_score_world_.end(); ) {
     double wx, wy;
     cellCenter(unpackX(it->first), unpackY(it->first), wx, wy);
-    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) { ++it; continue; }
+    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) {
+      it = nonground_score_world_.erase(it);
+      continue; 
+    }
 
     it->second *= nd;
     if (it->second < 1e-3f) it = nonground_score_world_.erase(it);
