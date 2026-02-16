@@ -75,6 +75,7 @@ private:
   double ground_decay_{0.90};    // multiplied each costmap update (0..1)
   double nonground_decay_{0.98}; // multiplied each costmap update (0..1)
 
+  double min_confidence_{5.0};     // ground score must exceed to be FREE
   double nonground_occ_thresh_{3.0};   // nonground score must exceed to be OCCUPIED
   double nonground_prob_thresh_{0.7};   // nonground probability must exceed to be OCCUPIED
 

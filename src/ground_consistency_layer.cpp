@@ -49,6 +49,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".nonground_inc", nonground_inc_);
   node->get_parameter(name_ + ".ground_decay", ground_decay_);
   node->get_parameter(name_ + ".nonground_decay", nonground_decay_);
+  node->get_parameter(name_ + ".min_confidence", min_confidence_);
   node->get_parameter(name_ + ".nonground_occ_thresh", nonground_occ_thresh_);
   node->get_parameter(name_ + ".nonground_prob_thresh", nonground_prob_thresh_);
   node->get_parameter(name_ + ".max_score", max_score_);
@@ -318,7 +319,7 @@ void GroundConsistencyLayer::updateCosts(
 
     uint8_t cost{0};
     float confidence = ng + g;
-    if (confidence < 3.0f){
+    if (confidence < min_confidence_){
       cost = nav2_costmap_2d::FREE_SPACE;
     }
     else{
