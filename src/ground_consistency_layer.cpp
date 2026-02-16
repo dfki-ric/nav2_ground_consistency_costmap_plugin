@@ -40,7 +40,6 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("ground_free_thresh", rclcpp::ParameterValue(5.0));
   declareParameter("nonground_occ_thresh", rclcpp::ParameterValue(3.0));
   declareParameter("max_score", rclcpp::ParameterValue(1000.0));
-  declareParameter("unknown_as_occupied", rclcpp::ParameterValue(true));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -50,11 +49,9 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".nonground_inc", nonground_inc_);
   node->get_parameter(name_ + ".ground_decay", ground_decay_);
   node->get_parameter(name_ + ".nonground_decay", nonground_decay_);
-  node->get_parameter(name_ + ".ground_free_thresh", ground_free_thresh_);
   node->get_parameter(name_ + ".nonground_occ_thresh", nonground_occ_thresh_);
   node->get_parameter(name_ + ".nonground_prob_thresh", nonground_prob_thresh_);
   node->get_parameter(name_ + ".max_score", max_score_);
-  node->get_parameter(name_ + ".unknown_as_occupied", unknown_as_occupied_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 

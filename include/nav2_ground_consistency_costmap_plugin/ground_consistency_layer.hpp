@@ -75,12 +75,10 @@ private:
   double ground_decay_{0.90};    // multiplied each costmap update (0..1)
   double nonground_decay_{0.98}; // multiplied each costmap update (0..1)
 
-  double ground_free_thresh_{5.0};     // ground score must exceed to be FREE
   double nonground_occ_thresh_{3.0};   // nonground score must exceed to be OCCUPIED
   double nonground_prob_thresh_{0.7};   // nonground probability must exceed to be OCCUPIED
 
   double max_score_{1000.0};     // clamp to avoid overflow
-  bool unknown_as_occupied_{true}; // safety default when uncertain
 
   // TF
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
