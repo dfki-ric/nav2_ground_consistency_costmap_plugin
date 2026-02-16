@@ -316,13 +316,20 @@ void GroundConsistencyLayer::updateCosts(
     if (auto itg = ground_score_world_.find(k); itg != ground_score_world_.end()) g = itg->second;
     if (auto itn = nonground_score_world_.find(k); itn != nonground_score_world_.end()) ng = itn->second;
 
-    const float denom = ng + g + eps;
-    const float p_occ = ng / denom;                  // 0..1
-    uint8_t cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
+    uint8_t cost{0};
+    float confidence = ng + g;
+    if (confidence < 3.0f){
+      cost = nav2_costmap_2d::FREE_SPACE;
+    }
+    else{
+      const float denom = ng + g + eps;
+      const float p_occ = ng / denom;                  // 0..1
+      cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
 
-    // Optional: hard lethal if very confident obstacle
-    if (ng >= oth && p_occ > pth) {
-      cost = nav2_costmap_2d::LETHAL_OBSTACLE;
+      // Optional: hard lethal if very confident obstacle
+      if (ng >= oth && p_occ > pth) {
+        cost = nav2_costmap_2d::LETHAL_OBSTACLE;
+      }
     }
 
     costs[k] = cost;
