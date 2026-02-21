@@ -37,7 +37,6 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("nonground_inc", rclcpp::ParameterValue(2.0));
   declareParameter("ground_decay", rclcpp::ParameterValue(0.90));
   declareParameter("nonground_decay", rclcpp::ParameterValue(0.98));
-  declareParameter("ground_free_thresh", rclcpp::ParameterValue(5.0));
   declareParameter("nonground_occ_thresh", rclcpp::ParameterValue(3.0));
   declareParameter("max_score", rclcpp::ParameterValue(1000.0));
 
