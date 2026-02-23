@@ -48,7 +48,6 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".nonground_inc", nonground_inc_);
   node->get_parameter(name_ + ".ground_decay", ground_decay_);
   node->get_parameter(name_ + ".nonground_decay", nonground_decay_);
-  node->get_parameter(name_ + ".min_confidence", min_confidence_);
   node->get_parameter(name_ + ".nonground_occ_thresh", nonground_occ_thresh_);
   node->get_parameter(name_ + ".nonground_prob_thresh", nonground_prob_thresh_);
   node->get_parameter(name_ + ".max_score", max_score_);
@@ -271,7 +270,7 @@ void GroundConsistencyLayer::updateCosts(
     wy = (static_cast<double>(yi) + 0.5) * res;
   };
 
-  // --- 1) Decay both maps (within window) + erase tiny entries
+  // Decay both maps (within window) + erase tiny entries
   for (auto it = ground_score_world_.begin(); it != ground_score_world_.end(); ) {
     double wx, wy;
     cellCenter(unpackX(it->first), unpackY(it->first), wx, wy);
@@ -297,7 +296,7 @@ void GroundConsistencyLayer::updateCosts(
     else ++it;
   }
 
-  // --- 2) Iterate union of keys in-window and compute p_occ
+  // Iterate union of keys in-window and compute p_occ
   // We'll build a temporary set of keys (cheap enough for your window sizes).
   std::unordered_map<WorldKey, uint8_t> costs;
   costs.reserve(4096);
@@ -317,19 +316,12 @@ void GroundConsistencyLayer::updateCosts(
     if (auto itn = nonground_score_world_.find(k); itn != nonground_score_world_.end()) ng = itn->second;
 
     uint8_t cost{0};
-    float confidence = ng + g;
-    if (confidence < min_confidence_){
-      cost = nav2_costmap_2d::FREE_SPACE;
-    }
-    else{
       const float denom = ng + g + eps;
       const float p_occ = ng / denom;                  // 0..1
       cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
 
-      // Optional: hard lethal if very confident obstacle
-      if (ng >= oth && p_occ > pth) {
-        cost = nav2_costmap_2d::LETHAL_OBSTACLE;
-      }
+    if (ng >= oth && p_occ > pth) {
+      cost = nav2_costmap_2d::LETHAL_OBSTACLE;
     }
 
     costs[k] = cost;
@@ -338,7 +330,7 @@ void GroundConsistencyLayer::updateCosts(
   for (const auto & kv : ground_score_world_)   add_key(kv.first);
   for (const auto & kv : nonground_score_world_) add_key(kv.first);
 
-  // --- 3) Write costs into master grid
+  //Write costs into master grid
   for (const auto & kv : costs) {
     const int32_t xi = unpackX(kv.first);
     const int32_t yi = unpackY(kv.first);
