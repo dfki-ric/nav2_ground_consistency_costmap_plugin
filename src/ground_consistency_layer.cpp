@@ -153,29 +153,24 @@ void GroundConsistencyLayer::groundCloudCallback(
     return;
   }
 
+  sensor_msgs::msg::PointCloud2 cloud_global;
+  tf2::doTransform(*msg, cloud_global, tf);
+
   std::unordered_map<WorldKey, uint32_t> local_counts;
   local_counts.reserve(4096);
 
-  sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud_global, "x");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud_global, "y");
 
-  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
-    geometry_msgs::msg::PointStamped ps, pg;
-    ps.header = msg->header;
-    ps.point.x = *iter_x;
-    ps.point.y = *iter_y;
-    ps.point.z = *iter_z;
+  const double res = getResolution();
 
-    tf2::doTransform(ps, pg, tf);
-
-    const double res = getResolution();
-    local_counts[worldKey(pg.point.x, pg.point.y, res)] += 1u;
+  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y) {
+      local_counts[worldKey(*iter_x, *iter_y, res)] += 1u;
   }
 
   std::lock_guard<std::mutex> lock(mutex_);
-  for (const auto & kv : local_counts) {
-    ground_counts_frame_[kv.first] += kv.second;
+  for (const auto& kv : local_counts) {
+      ground_counts_frame_[kv.first] += kv.second;
   }
 }
 
@@ -186,7 +181,8 @@ void GroundConsistencyLayer::nongroundCloudCallback(
   if (!node) return;
 
   geometry_msgs::msg::TransformStamped tf;
-  if (!lookupTF(tf_buffer_, global_frame_, msg->header.frame_id, msg->header.stamp, tf_timeout_, tf)) {
+  if (!lookupTF(tf_buffer_, global_frame_, msg->header.frame_id,
+                msg->header.stamp, tf_timeout_, tf)) {
     RCLCPP_WARN(
       node->get_logger(),
       "[GCL][nonground] TF failed %s -> %s",
@@ -194,28 +190,23 @@ void GroundConsistencyLayer::nongroundCloudCallback(
     return;
   }
 
+  sensor_msgs::msg::PointCloud2 cloud_global;
+  tf2::doTransform(*msg, cloud_global, tf);
+
   std::unordered_map<WorldKey, uint32_t> local_counts;
   local_counts.reserve(4096);
 
-  sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_z(*msg, "z");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud_global, "x");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud_global, "y");
 
-  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
-    geometry_msgs::msg::PointStamped ps, pg;
-    ps.header = msg->header;
-    ps.point.x = *iter_x;
-    ps.point.y = *iter_y;
-    ps.point.z = *iter_z;
+  const double res = getResolution();
 
-    tf2::doTransform(ps, pg, tf);
-
-    const double res = getResolution();
-    local_counts[worldKey(pg.point.x, pg.point.y, res)] += 1u;
+  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y) {
+    local_counts[worldKey(*iter_x, *iter_y, res)] += 1u;
   }
 
   std::lock_guard<std::mutex> lock(mutex_);
-  for (const auto & kv : local_counts) {
+  for (const auto& kv : local_counts) {
     nonground_counts_frame_[kv.first] += kv.second;
   }
 }
