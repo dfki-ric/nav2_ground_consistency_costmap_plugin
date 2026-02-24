@@ -4,7 +4,7 @@
     type="nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer"
     base_class_type="nav2_costmap_2d::Layer">
     <description>
-      Clears occupied cells if point evidence exists.
+      Evidence-based costmap layer using ground and non-ground PointCloud2 topics to estimate occupancy with temporal decay and height-based filtering.
     </description>
   </class>
 </library>
