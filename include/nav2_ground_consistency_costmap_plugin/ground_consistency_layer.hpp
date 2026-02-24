@@ -80,6 +80,9 @@ private:
 
   double max_score_{1000.0};     // clamp to avoid overflow
 
+  double min_clearance_{0.2};
+  double robot_height_{0.5};
+
   // TF
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
@@ -91,6 +94,12 @@ private:
   // Persistent scores in stable world grid
   std::unordered_map<WorldKey, float> ground_score_world_;
   std::unordered_map<WorldKey, float> nonground_score_world_;
+
+  // Terrain properties
+  std::unordered_map<WorldKey, uint32_t> ground_height_count_world_;
+  std::unordered_map<WorldKey, double> ground_height_sum_world_;
+  std::unordered_map<WorldKey, double> obstacle_min_height_world_;
+  std::unordered_map<WorldKey, double> obstacle_max_height_world_;
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr ground_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr nonground_sub_;

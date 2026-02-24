@@ -10,6 +10,7 @@
 #include "sensor_msgs/point_cloud2_iterator.hpp"
 #include "geometry_msgs/msg/point_stamped.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
+#include "tf2_sensor_msgs/tf2_sensor_msgs.hpp"
 
 #include "nav2_costmap_2d/cost_values.hpp"
 
@@ -32,18 +33,19 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("ground_points_topic", rclcpp::ParameterValue(std::string("/ground_points")));
   declareParameter("nonground_points_topic", rclcpp::ParameterValue(std::string("/nonground_points")));
   declareParameter("tf_timeout", rclcpp::ParameterValue(0.1));
-
   declareParameter("ground_inc", rclcpp::ParameterValue(1.0));
   declareParameter("nonground_inc", rclcpp::ParameterValue(2.0));
   declareParameter("ground_decay", rclcpp::ParameterValue(0.90));
   declareParameter("nonground_decay", rclcpp::ParameterValue(0.98));
   declareParameter("nonground_occ_thresh", rclcpp::ParameterValue(3.0));
+  declareParameter("nonground_prob_thresh", rclcpp::ParameterValue(0.7));
   declareParameter("max_score", rclcpp::ParameterValue(1000.0));
+  declareParameter("min_clearance", rclcpp::ParameterValue(0.10)); // meters
+  declareParameter("robot_height", rclcpp::ParameterValue(1.2));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
   node->get_parameter(name_ + ".tf_timeout", tf_timeout_);
-
   node->get_parameter(name_ + ".ground_inc", ground_inc_);
   node->get_parameter(name_ + ".nonground_inc", nonground_inc_);
   node->get_parameter(name_ + ".ground_decay", ground_decay_);
@@ -51,6 +53,8 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".nonground_occ_thresh", nonground_occ_thresh_);
   node->get_parameter(name_ + ".nonground_prob_thresh", nonground_prob_thresh_);
   node->get_parameter(name_ + ".max_score", max_score_);
+  node->get_parameter(name_ + ".min_clearance", min_clearance_);
+  node->get_parameter(name_ + ".robot_height", robot_height_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
@@ -87,6 +91,11 @@ void GroundConsistencyLayer::matchSize()
   nonground_counts_frame_.clear();
   ground_score_world_.clear();
   nonground_score_world_.clear();
+
+  ground_height_count_world_.clear();
+  ground_height_sum_world_.clear();
+  obstacle_min_height_world_.clear();
+  obstacle_max_height_world_.clear();
 }
 
 void GroundConsistencyLayer::reset()
@@ -145,11 +154,8 @@ void GroundConsistencyLayer::groundCloudCallback(
   if (!node) return;
 
   geometry_msgs::msg::TransformStamped tf;
-  if (!lookupTF(tf_buffer_, global_frame_, msg->header.frame_id, msg->header.stamp, tf_timeout_, tf)) {
-    RCLCPP_WARN(
-      node->get_logger(),
-      "[GCL][ground] TF failed %s -> %s",
-      msg->header.frame_id.c_str(), global_frame_.c_str());
+  if (!lookupTF(tf_buffer_, global_frame_, msg->header.frame_id,
+                msg->header.stamp, tf_timeout_, tf)) {
     return;
   }
 
@@ -161,16 +167,33 @@ void GroundConsistencyLayer::groundCloudCallback(
 
   sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud_global, "x");
   sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud_global, "y");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud_global, "z");
 
   const double res = getResolution();
 
-  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y) {
-      local_counts[worldKey(*iter_x, *iter_y, res)] += 1u;
+  // First pass: build local counts only
+  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+    WorldKey key = worldKey(*iter_x, *iter_y, res);
+    local_counts[key] += 1u;
   }
 
+  // Lock before touching shared maps
   std::lock_guard<std::mutex> lock(mutex_);
+
+  // Update frame counts
   for (const auto& kv : local_counts) {
-      ground_counts_frame_[kv.first] += kv.second;
+    ground_counts_frame_[kv.first] += kv.second;
+  }
+
+  // Second pass: update height statistics safely
+  sensor_msgs::PointCloud2ConstIterator<float> iter_x2(cloud_global, "x");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_y2(cloud_global, "y");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_z2(cloud_global, "z");
+
+  for (; iter_x2 != iter_x2.end(); ++iter_x2, ++iter_y2, ++iter_z2) {
+    WorldKey key = worldKey(*iter_x2, *iter_y2, res);
+    ground_height_sum_world_[key] += *iter_z2;
+    ground_height_count_world_[key] += 1u;
   }
 }
 
@@ -183,10 +206,6 @@ void GroundConsistencyLayer::nongroundCloudCallback(
   geometry_msgs::msg::TransformStamped tf;
   if (!lookupTF(tf_buffer_, global_frame_, msg->header.frame_id,
                 msg->header.stamp, tf_timeout_, tf)) {
-    RCLCPP_WARN(
-      node->get_logger(),
-      "[GCL][nonground] TF failed %s -> %s",
-      msg->header.frame_id.c_str(), global_frame_.c_str());
     return;
   }
 
@@ -198,16 +217,42 @@ void GroundConsistencyLayer::nongroundCloudCallback(
 
   sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud_global, "x");
   sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud_global, "y");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud_global, "z");
 
   const double res = getResolution();
 
-  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y) {
-    local_counts[worldKey(*iter_x, *iter_y, res)] += 1u;
+  // First pass: build local counts only
+  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+    WorldKey key = worldKey(*iter_x, *iter_y, res);
+    local_counts[key] += 1u;
   }
 
+  // Lock before touching shared maps
   std::lock_guard<std::mutex> lock(mutex_);
+
+  // Update frame counts
   for (const auto& kv : local_counts) {
     nonground_counts_frame_[kv.first] += kv.second;
+  }
+
+  // Second pass: update obstacle height stats safely
+  sensor_msgs::PointCloud2ConstIterator<float> iter_x2(cloud_global, "x");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_y2(cloud_global, "y");
+  sensor_msgs::PointCloud2ConstIterator<float> iter_z2(cloud_global, "z");
+
+  for (; iter_x2 != iter_x2.end(); ++iter_x2, ++iter_y2, ++iter_z2) {
+    WorldKey key = worldKey(*iter_x2, *iter_y2, res);
+
+    auto min_it = obstacle_min_height_world_.find(key);
+    if (min_it == obstacle_min_height_world_.end()) {
+      obstacle_min_height_world_[key] = *iter_z2;
+      obstacle_max_height_world_[key] = *iter_z2;
+    } else {
+      obstacle_min_height_world_[key] =
+        std::min(obstacle_min_height_world_[key], static_cast<double>(*iter_z2));
+      obstacle_max_height_world_[key] =
+        std::max(obstacle_max_height_world_[key], static_cast<double>(*iter_z2));
+    }
   }
 }
 
@@ -270,8 +315,22 @@ void GroundConsistencyLayer::updateCosts(
       continue; 
     }
     it->second *= gd;
-    if (it->second < 1e-3f) it = ground_score_world_.erase(it);
-    else ++it;
+    if (it->second < 1e-3f)
+    {
+        WorldKey k = it->first;
+
+        // erase associated terrain data
+        ground_height_sum_world_.erase(k);
+        ground_height_count_world_.erase(k);
+        obstacle_min_height_world_.erase(k);
+        obstacle_max_height_world_.erase(k);
+
+        it = ground_score_world_.erase(it);
+    }
+    else
+    {
+        ++it;
+    }
   }
 
   for (auto it = nonground_score_world_.begin(); it != nonground_score_world_.end(); ) {
@@ -283,8 +342,22 @@ void GroundConsistencyLayer::updateCosts(
     }
 
     it->second *= nd;
-    if (it->second < 1e-3f) it = nonground_score_world_.erase(it);
-    else ++it;
+    if (it->second < 1e-3f)
+    {
+        WorldKey k = it->first;
+
+        // erase associated terrain data
+        ground_height_sum_world_.erase(k);
+        ground_height_count_world_.erase(k);
+        obstacle_min_height_world_.erase(k);
+        obstacle_max_height_world_.erase(k);
+
+        it = nonground_score_world_.erase(it);
+    }
+    else
+    {
+        ++it;
+    }
   }
 
   // Iterate union of keys in-window and compute p_occ
@@ -307,12 +380,56 @@ void GroundConsistencyLayer::updateCosts(
     if (auto itn = nonground_score_world_.find(k); itn != nonground_score_world_.end()) ng = itn->second;
 
     uint8_t cost{0};
-      const float denom = ng + g + eps;
-      const float p_occ = ng / denom;                  // 0..1
-      cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
 
-    if (ng >= oth && p_occ > pth) {
-      cost = nav2_costmap_2d::LETHAL_OBSTACLE;
+    const float denom = ng + g + eps;
+    const float p_occ = ng / denom;
+    cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
+
+    bool make_lethal = false;
+    bool make_free = false;
+    if (ng >= oth && p_occ > pth)
+    {
+        double ground_avg = 0.0;
+        auto it_sum = ground_height_sum_world_.find(k);
+        auto it_cnt = ground_height_count_world_.find(k);
+        if (it_sum != ground_height_sum_world_.end() &&
+            it_cnt != ground_height_count_world_.end() &&
+            it_cnt->second > 0u)
+        {
+          ground_avg = it_sum->second / static_cast<double>(it_cnt->second);
+        }
+        double obs_min = 0.0;
+        double obs_max = 0.0;
+        if (obstacle_min_height_world_.count(k))
+        {
+            obs_min = obstacle_min_height_world_[k];
+            obs_max = obstacle_max_height_world_[k];
+        }
+
+        double step_height = obs_min - ground_avg;
+        double obstacle_height = obs_max - ground_avg;
+
+        bool is_tunnel = step_height > robot_height_;
+        bool is_small_obstacle = obstacle_height < min_clearance_;
+
+        if (is_tunnel || is_small_obstacle)
+        {
+          make_free = true;   // explicit override to free
+        }
+        else
+        {
+          make_lethal = true; // confirmed blocking
+        }
+    }
+
+    // Apply overrides
+    if (make_lethal)
+    {
+        cost = nav2_costmap_2d::LETHAL_OBSTACLE;
+    }
+    else if (make_free)
+    {
+        cost = nav2_costmap_2d::FREE_SPACE;
     }
 
     costs[k] = cost;
