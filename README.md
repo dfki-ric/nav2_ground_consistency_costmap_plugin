@@ -270,6 +270,31 @@ Or integrate a conversion node into your launch pipeline.
 
 **Design Philosophy**: This layer is a consumer of segmentation output, not a sensor driver.
 
+### Footprint Clearing: Preventing Robot Self-Blocking
+
+This plugin includes **active robot footprint clearing** to ensure the robot never self-blocks.
+
+**How it works:**
+
+1. **Every costmap update**, the layer retrieves the robot's footprint polygon
+2. **Transforms** it to the current robot pose (robot_x, robot_y, robot_yaw)
+3. **Marks all cells within the footprint** as FREE_SPACE to prevent obstacles from being placed under the robot
+4. This runs **before** occupancy evidence is applied, ensuring footprint cells are always clear
+
+**Footprint Configuration:**
+
+- If a footprint is configured in your costmap (via Nav2 parameter `footprint`), it will be used
+- If no footprint is configured, a **default circular footprint (0.5m radius)** is automatically used
+- To customize, add this to your costmap config:
+  ```yaml
+  costmap:
+    footprint: "[[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]"  # meters
+  ```
+
+**Parameter Control:**
+
+Set `footprint_clearing_enabled: false` in the layer config to disable this feature (not recommended for safety).
+
 ---
 
 ## License

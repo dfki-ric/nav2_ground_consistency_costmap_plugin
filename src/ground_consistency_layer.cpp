@@ -133,8 +133,23 @@ void GroundConsistencyLayer::updateFootprint(
     return;
   }
 
+  // Get robot footprint from costmap
+  std::vector<geometry_msgs::msg::Point> footprint = getFootprint();
+
+  if (footprint.empty()) {
+    // If no footprint is configured, use a circular default (0.5m radius)
+    const double default_radius = 0.5;
+    for (int angle = 0; angle < 16; ++angle) {
+      geometry_msgs::msg::Point pt;
+      pt.x = default_radius * std::cos(2.0 * M_PI * angle / 16.0);
+      pt.y = default_radius * std::sin(2.0 * M_PI * angle / 16.0);
+      pt.z = 0.0;
+      footprint.push_back(pt);
+    }
+  }
+
   // Transform robot footprint to current pose
-  nav2_costmap_2d::transformFootprint(robot_x, robot_y, robot_yaw, getFootprint(), transformed_footprint_);
+  nav2_costmap_2d::transformFootprint(robot_x, robot_y, robot_yaw, footprint, transformed_footprint_);
 
   // Update bounds to include footprint
   for (unsigned int i = 0; i < transformed_footprint_.size(); ++i) {
@@ -304,8 +319,41 @@ void GroundConsistencyLayer::updateCosts(
 
   integrateFrameCountsIntoScores();
 
-  // Clear robot footprint to prevent self-blocking
-  if (footprint_clearing_enabled_) {
+  // Clear robot footprint evidence to prevent self-blocking
+  if (footprint_clearing_enabled_ && !transformed_footprint_.empty()) {
+    // Find bounds of footprint in world coordinates
+    double fp_min_x = std::numeric_limits<double>::max();
+    double fp_min_y = std::numeric_limits<double>::max();
+    double fp_max_x = std::numeric_limits<double>::lowest();
+    double fp_max_y = std::numeric_limits<double>::lowest();
+
+    for (const auto & pt : transformed_footprint_) {
+      fp_min_x = std::min(fp_min_x, pt.x);
+      fp_min_y = std::min(fp_min_y, pt.y);
+      fp_max_x = std::max(fp_max_x, pt.x);
+      fp_max_y = std::max(fp_max_y, pt.y);
+    }
+
+    const double res = getResolution();
+    const int32_t min_xi = static_cast<int32_t>(std::floor(fp_min_x / res));
+    const int32_t min_yi = static_cast<int32_t>(std::floor(fp_min_y / res));
+    const int32_t max_xi = static_cast<int32_t>(std::floor(fp_max_x / res));
+    const int32_t max_yi = static_cast<int32_t>(std::floor(fp_max_y / res));
+
+    // Remove evidence scores in footprint area
+    for (int32_t xi = min_xi; xi <= max_xi; ++xi) {
+      for (int32_t yi = min_yi; yi <= max_yi; ++yi) {
+        WorldKey key = packXY(xi, yi);
+        ground_score_world_.erase(key);
+        nonground_score_world_.erase(key);
+        ground_height_count_world_.erase(key);
+        ground_height_sum_world_.erase(key);
+        obstacle_min_height_world_.erase(key);
+        obstacle_max_height_world_.erase(key);
+      }
+    }
+
+    // Also mark the costmap cells as FREE_SPACE for immediate effect
     setConvexPolygonCost(transformed_footprint_, nav2_costmap_2d::FREE_SPACE);
   }
 
