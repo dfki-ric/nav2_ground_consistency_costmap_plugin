@@ -13,6 +13,7 @@
 #include "tf2_sensor_msgs/tf2_sensor_msgs.hpp"
 
 #include "nav2_costmap_2d/cost_values.hpp"
+#include "nav2_costmap_2d/footprint.hpp"
 
 namespace nav2_ground_consistency_costmap_plugin
 {
@@ -42,6 +43,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("max_score", rclcpp::ParameterValue(1000.0));
   declareParameter("min_clearance", rclcpp::ParameterValue(0.10)); // meters
   declareParameter("robot_height", rclcpp::ParameterValue(1.2));
+  declareParameter("footprint_clearing_enabled", rclcpp::ParameterValue(true));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -55,6 +57,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".max_score", max_score_);
   node->get_parameter(name_ + ".min_clearance", min_clearance_);
   node->get_parameter(name_ + ".robot_height", robot_height_);
+  node->get_parameter(name_ + ".footprint_clearing_enabled", footprint_clearing_enabled_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
@@ -108,7 +111,7 @@ void GroundConsistencyLayer::reset()
 }
 
 void GroundConsistencyLayer::updateBounds(
-  double, double, double,
+  double robot_x, double robot_y, double robot_yaw,
   double * min_x, double * min_y,
   double * max_x, double * max_y)
 {
@@ -116,6 +119,27 @@ void GroundConsistencyLayer::updateBounds(
   *min_y = std::numeric_limits<double>::lowest();
   *max_x = std::numeric_limits<double>::max();
   *max_y = std::numeric_limits<double>::max();
+
+  // Transform robot footprint for clearing
+  updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
+}
+
+void GroundConsistencyLayer::updateFootprint(
+  double robot_x, double robot_y, double robot_yaw,
+  double * min_x, double * min_y,
+  double * max_x, double * max_y)
+{
+  if (!footprint_clearing_enabled_) {
+    return;
+  }
+
+  // Transform robot footprint to current pose
+  nav2_costmap_2d::transformFootprint(robot_x, robot_y, robot_yaw, getFootprint(), transformed_footprint_);
+
+  // Update bounds to include footprint
+  for (unsigned int i = 0; i < transformed_footprint_.size(); ++i) {
+    touch(transformed_footprint_[i].x, transformed_footprint_[i].y, min_x, min_y, max_x, max_y);
+  }
 }
 
 static inline int32_t unpackX(nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer::WorldKey k)
@@ -279,6 +303,11 @@ void GroundConsistencyLayer::updateCosts(
   std::lock_guard<std::mutex> lock(mutex_);
 
   integrateFrameCountsIntoScores();
+
+  // Clear robot footprint to prevent self-blocking
+  if (footprint_clearing_enabled_) {
+    setConvexPolygonCost(transformed_footprint_, nav2_costmap_2d::FREE_SPACE);
+  }
 
   const double res = getResolution();
   const float gd = static_cast<float>(ground_decay_);

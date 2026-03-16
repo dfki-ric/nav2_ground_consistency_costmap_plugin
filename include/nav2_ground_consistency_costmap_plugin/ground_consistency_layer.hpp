@@ -9,6 +9,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "nav2_costmap_2d/costmap_layer.hpp"
 #include "sensor_msgs/msg/point_cloud2.hpp"
+#include "geometry_msgs/msg/point.hpp"
 
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
@@ -63,6 +64,10 @@ private:
 
   void integrateFrameCountsIntoScores();
 
+  void updateFootprint(
+    double robot_x, double robot_y, double robot_yaw,
+    double * min_x, double * min_y, double * max_x, double * max_y);
+
   // Params
   std::string ground_topic_;
   std::string nonground_topic_;
@@ -82,6 +87,10 @@ private:
 
   double min_clearance_{0.2};
   double robot_height_{0.5};
+
+  // Footprint clearing
+  bool footprint_clearing_enabled_{true};
+  std::vector<geometry_msgs::msg::Point> transformed_footprint_;
 
   // TF
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
