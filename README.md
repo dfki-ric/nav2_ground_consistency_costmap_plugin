@@ -49,6 +49,7 @@ Configuration parameters control the evidence accumulation, decay rates, and cla
 | `min_clearance` | `0.10` | double | Maximum obstacle height [m] considered "small" (passable under) |
 | `robot_height` | `1.2` | double | Robot height [m] used for tunnel detection (obstacles above this are tunnels) |
 | `tf_timeout` | `0.1` | double | TF lookup timeout [seconds] for cloud transformation |
+| `footprint_clearing_enabled` | `true` | bool | Enable clearing of robot footprint polygon to prevent self-blocking |
 
 ---
 
@@ -138,14 +139,10 @@ Add the layer to your Nav2 costmap configuration:
 ```yaml
 local_costmap:
   local_costmap:
-    plugins: ["static_layer", "obstacle_layer", "ground_consistency_layer", "inflation_layer"]
+    plugins: ["static_layer", "ground_consistency_layer", "inflation_layer"]
     static_layer:
       plugin: "nav2_costmap_2d::StaticLayer"
       map_subscribe_transient_local: true
-
-    obstacle_layer:
-      plugin: "nav2_costmap_2d::ObstacleLayer"
-      # ... standard obstacle layer config ...
 
     ground_consistency_layer:
       plugin: "nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer"
@@ -158,14 +155,19 @@ local_costmap:
       nonground_occ_thresh: 3.0
       nonground_prob_thresh: 0.7
       max_score: 1000.0
-      min_clearance: 0.1       # 10 cm: small obstacles max height
-      robot_height: 1.2        # 1.2 m: tunnel detection threshold
+      min_clearance: 0.1              # 10 cm: small obstacles max height
+      robot_height: 1.2               # 1.2 m: tunnel detection threshold
       tf_timeout: 0.1
+      footprint_clearing_enabled: true # Clear robot footprint polygon
 
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
       # ... standard inflation layer config ...
 ```
+
+**Note**: This layer can run standalone with its own footprint clearing, or alongside `obstacle_layer`
+for complementary raw sensor data feedback. The footprint clearing prevents the robot from
+self-blocking when traversing difficult terrain detected by ground segmentation.
 
 ---
 
@@ -198,6 +200,75 @@ local_costmap:
 - If lagging, check point cloud frequency and density
 - Adjust `max_score` to prevent score explosion
 - Monitor memory with `ros2 node info /costmap_node`
+
+---
+
+## Design Rationale
+
+### Clearing Strategy: Passive Decay vs. Active Raytracing
+
+This plugin uses **passive temporal decay** for clearing, not active raytracing.
+
+**Why passive decay is appropriate for this plugin:**
+
+1. **Pre-segmented input assumption**: Ground points represent confirmed ground, implying
+   obstacle-free space underneath. This is stronger than raw sensor data where raytracing
+   is necessary to confirm free space.
+
+2. **Height-aware classification**: Unlike obstacle_layer, we use ground height statistics
+   to distinguish passable obstacles (tunnels, curbs). A decayed obstacle score doesn't
+   make terrain unpredictable; height statistics remain to inform classification.
+
+3. **Computational efficiency**: Raytracing all point clouds would be O(n * m) per cycle
+   where n=points, m=costmap cells. Our O(n) evidence accumulation + O(k) decay is more
+   efficient for dense point clouds.
+
+4. **Dynamic environment handling**: Decay naturally "forgets" stale obstacles:
+   - `ground_decay=0.90`: Ground evidence persists longer (environment stable)
+   - `nonground_decay=0.98`: Obstacle evidence decays slower (cautious)
+   Users can tune decay rates for their environment dynamics.
+
+5. **Complementary with obstacle_layer**: In a typical Nav2 stack, this layer runs
+   *alongside* obstacle_layer which provides active raytracing and clearing. Together
+   they provide both semantic understanding (this layer) and active free-space clearing
+   (obstacle_layer).
+
+### Input Format: PointCloud2-Only (By Design)
+
+This plugin **only accepts PointCloud2**, not LaserScan.
+
+**Why PointCloud2, not LaserScan:**
+
+1. **Alignment with Segmentation Pipeline**: Ground segmentation algorithms (KITTI, MLS-based)
+   produce PointCloud2 output with semantic labels. LaserScan is unstructured range data
+   requiring angle-based reconstruction. Supporting it adds no value and increases complexity.
+
+2. **Upstream Conversion is Simpler**: Converting LaserScan→PointCloud2 is a well-solved
+   problem. This follows Unix philosophy: do one thing well. The conversion responsibility
+   belongs in the segmentation pipeline, not in this layer.
+
+3. **No Performance Loss**: Point clouds from LaserScan conversion are just as efficient as
+   native point clouds. The layer processes all PointCloud2 data uniformly.
+
+4. **Reduces Plugin Complexity**: Adding LaserScan support requires:
+   - LaserProjector dependency
+   - Message type dispatch logic
+   - Separate callback paths
+   - Additional test cases
+
+   For minimal benefit (a conversion that should happen upstream anyway).
+
+**For users with LaserScans:**
+
+Use standard ROS tooling to convert LaserScan to PointCloud2:
+```bash
+ros2 run laser_geometry laserscan_to_pointcloud_node \
+  --ros-args -r scan_in:=/scan -r cloud_out:=/ground_points
+```
+
+Or integrate a conversion node into your launch pipeline.
+
+**Design Philosophy**: This layer is a consumer of segmentation output, not a sensor driver.
 
 ---
 
