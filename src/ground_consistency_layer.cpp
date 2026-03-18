@@ -18,6 +18,16 @@
 namespace nav2_ground_consistency_costmap_plugin
 {
 
+static inline int32_t unpackX(GroundConsistencyLayer::WorldKey k)
+{
+  return static_cast<int32_t>(static_cast<uint32_t>(k >> 32));
+}
+
+static inline int32_t unpackY(GroundConsistencyLayer::WorldKey k)
+{
+  return static_cast<int32_t>(static_cast<uint32_t>(k & 0xFFFFFFFFu));
+}
+
 GroundConsistencyLayer::GroundConsistencyLayer()
 {
   costmap_ = nullptr;
@@ -64,6 +74,16 @@ void GroundConsistencyLayer::onInitialize()
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
+  matchSize();
+
+  RCLCPP_INFO(node->get_logger(), 
+    "GroundConsistencyLayer initialized. global_frame=%s, "
+    "ground_topic=%s, nonground_topic=%s",
+    global_frame_.c_str(), ground_topic_.c_str(), nonground_topic_.c_str());
+
+  enabled_ = true;
+  current_ = true;
+}
 
 void GroundConsistencyLayer::activate()
 {
@@ -83,7 +103,10 @@ void GroundConsistencyLayer::activate()
     nonground_topic_, qos,
     std::bind(&GroundConsistencyLayer::nongroundCloudCallback, this, std::placeholders::_1));
 
-  matchSize();
+  RCLCPP_INFO(node->get_logger(),
+    "GroundConsistencyLayer activated. Subscribed to %s and %s",
+    ground_topic_.c_str(), nonground_topic_.c_str());
+}
 
 void GroundConsistencyLayer::deactivate()
 {
@@ -94,12 +117,14 @@ void GroundConsistencyLayer::deactivate()
     return;
   }
 
-  RCLCPP_WARN(node->get_logger(), "global_frame_=%s",
-  global_frame_.c_str());
+  // Reset subscriptions (destroys them)
+  ground_sub_ = nullptr;
+  nonground_sub_ = nullptr;
 
-  enabled_ = true;
-  current_ = true;
+  RCLCPP_INFO(node->get_logger(),
+    "GroundConsistencyLayer deactivated. Unsubscribed from ground/nonground topics");
 }
+
 
 void GroundConsistencyLayer::matchSize()
 {
@@ -133,10 +158,51 @@ void GroundConsistencyLayer::updateBounds(
   double * min_x, double * min_y,
   double * max_x, double * max_y)
 {
-  *min_x = std::numeric_limits<double>::lowest();
-  *min_y = std::numeric_limits<double>::lowest();
-  *max_x = std::numeric_limits<double>::max();
-  *max_y = std::numeric_limits<double>::max();
+  double local_min_x = std::numeric_limits<double>::max();
+  double local_min_y = std::numeric_limits<double>::max();
+  double local_max_x = std::numeric_limits<double>::lowest();
+  double local_max_y = std::numeric_limits<double>::lowest();
+
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    // Find bounds from ground evidence
+    for (const auto& kv : ground_score_world_) {
+      int32_t xi = unpackX(kv.first);
+      int32_t yi = unpackY(kv.first);
+      double wx = (xi + 0.5) * getResolution();
+      double wy = (yi + 0.5) * getResolution();
+
+      local_min_x = std::min(local_min_x, wx);
+      local_max_x = std::max(local_max_x, wx);
+      local_min_y = std::min(local_min_y, wy);
+      local_max_y = std::max(local_max_y, wy);
+    }
+
+    // Find bounds from obstacle evidence
+    for (const auto& kv : nonground_score_world_) {
+      int32_t xi = unpackX(kv.first);
+      int32_t yi = unpackY(kv.first);
+      double wx = (xi + 0.5) * getResolution();
+      double wy = (yi + 0.5) * getResolution();
+
+      local_min_x = std::min(local_min_x, wx);
+      local_max_x = std::max(local_max_x, wx);
+      local_min_y = std::min(local_min_y, wy);
+      local_max_y = std::max(local_max_y, wy);
+    }
+  }
+
+  // If no data, just update footprint (don't update costmap data)
+  if (local_min_x > local_max_x) {
+    updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
+    return;
+  }
+
+  *min_x = local_min_x;
+  *min_y = local_min_y;
+  *max_x = local_max_x;
+  *max_y = local_max_y;
 
   // Transform robot footprint for clearing
   updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
@@ -173,17 +239,6 @@ void GroundConsistencyLayer::updateFootprint(
     touch(transformed_footprint_[i].x, transformed_footprint_[i].y, min_x, min_y, max_x, max_y);
   }
 }
-
-static inline int32_t unpackX(nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer::WorldKey k)
-{
-  return static_cast<int32_t>(static_cast<uint32_t>(k >> 32));
-}
-
-static inline int32_t unpackY(nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer::WorldKey k)
-{
-  return static_cast<int32_t>(static_cast<uint32_t>(k & 0xFFFFFFFFu));
-}
-
 
 static bool lookupTF(
   const std::shared_ptr<tf2_ros::Buffer> & buffer,
