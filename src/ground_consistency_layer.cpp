@@ -64,6 +64,16 @@ void GroundConsistencyLayer::onInitialize()
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
+
+void GroundConsistencyLayer::activate()
+{
+  auto node = node_.lock();
+  if (!node) {
+    RCLCPP_ERROR(rclcpp::get_logger("nav2_costmap_2d"),
+      "GroundConsistencyLayer::activate() - node expired");
+    return;
+  }
+
   auto qos = rclcpp::SensorDataQoS();
   ground_sub_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
     ground_topic_, qos,
@@ -75,6 +85,14 @@ void GroundConsistencyLayer::onInitialize()
 
   matchSize();
 
+void GroundConsistencyLayer::deactivate()
+{
+  auto node = node_.lock();
+  if (!node) {
+    RCLCPP_ERROR(rclcpp::get_logger("nav2_costmap_2d"),
+      "GroundConsistencyLayer::deactivate() - node expired");
+    return;
+  }
 
   RCLCPP_WARN(node->get_logger(), "global_frame_=%s",
   global_frame_.c_str());

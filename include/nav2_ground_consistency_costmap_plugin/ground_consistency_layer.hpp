@@ -25,6 +25,10 @@ public:
 
   void onInitialize() override;
 
+  void activate() override;
+
+  void deactivate() override;
+
   void matchSize() override;
 
   void updateBounds(
