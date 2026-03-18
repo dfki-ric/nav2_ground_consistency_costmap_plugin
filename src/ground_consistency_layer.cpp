@@ -191,28 +191,63 @@ void GroundConsistencyLayer::groundCloudCallback(
   auto node = node_.lock();
   if (!node) return;
 
+  // Validate input message
+  if (!msg || msg->data.empty()) {
+    RCLCPP_DEBUG(node->get_logger(),
+      "GroundConsistencyLayer: Received empty ground point cloud");
+    return;
+  }
+
+  if (msg->point_step == 0) {
+    RCLCPP_WARN(node->get_logger(),
+      "GroundConsistencyLayer: Invalid ground point cloud (point_step=0)");
+    return;
+  }
+
   geometry_msgs::msg::TransformStamped tf;
   if (!lookupTF(tf_buffer_, global_frame_, msg->header.frame_id,
                 msg->header.stamp, tf_timeout_, tf)) {
+    RCLCPP_DEBUG(node->get_logger(),
+      "GroundConsistencyLayer: TF lookup failed for ground cloud from %s",
+      msg->header.frame_id.c_str());
     return;
   }
 
   sensor_msgs::msg::PointCloud2 cloud_global;
-  tf2::doTransform(*msg, cloud_global, tf);
+  try {
+    tf2::doTransform(*msg, cloud_global, tf);
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(node->get_logger(),
+      "GroundConsistencyLayer: Failed to transform ground cloud: %s", e.what());
+    return;
+  }
+
+  // Validate required fields exist
+  if (cloud_global.fields.empty()) {
+    RCLCPP_WARN(node->get_logger(),
+      "GroundConsistencyLayer: Ground point cloud has no fields");
+    return;
+  }
 
   std::unordered_map<WorldKey, uint32_t> local_counts;
   local_counts.reserve(4096);
 
-  sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud_global, "x");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud_global, "y");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud_global, "z");
-
   const double res = getResolution();
 
-  // First pass: build local counts only
-  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
-    WorldKey key = worldKey(*iter_x, *iter_y, res);
-    local_counts[key] += 1u;
+  try {
+    sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud_global, "x");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud_global, "y");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud_global, "z");
+
+    // First pass: build local counts only
+    for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+      WorldKey key = worldKey(*iter_x, *iter_y, res);
+      local_counts[key] += 1u;
+    }
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(node->get_logger(),
+      "GroundConsistencyLayer: Failed to read ground cloud fields: %s", e.what());
+    return;
   }
 
   // Lock before touching shared maps
@@ -224,14 +259,19 @@ void GroundConsistencyLayer::groundCloudCallback(
   }
 
   // Second pass: update height statistics safely
-  sensor_msgs::PointCloud2ConstIterator<float> iter_x2(cloud_global, "x");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_y2(cloud_global, "y");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_z2(cloud_global, "z");
+  try {
+    sensor_msgs::PointCloud2ConstIterator<float> iter_x2(cloud_global, "x");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_y2(cloud_global, "y");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_z2(cloud_global, "z");
 
-  for (; iter_x2 != iter_x2.end(); ++iter_x2, ++iter_y2, ++iter_z2) {
-    WorldKey key = worldKey(*iter_x2, *iter_y2, res);
-    ground_height_sum_world_[key] += *iter_z2;
-    ground_height_count_world_[key] += 1u;
+    for (; iter_x2 != iter_x2.end(); ++iter_x2, ++iter_y2, ++iter_z2) {
+      WorldKey key = worldKey(*iter_x2, *iter_y2, res);
+      ground_height_sum_world_[key] += *iter_z2;
+      ground_height_count_world_[key] += 1u;
+    }
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(node->get_logger(),
+      "GroundConsistencyLayer: Failed to process ground height stats: %s", e.what());
   }
 }
 
@@ -241,28 +281,63 @@ void GroundConsistencyLayer::nongroundCloudCallback(
   auto node = node_.lock();
   if (!node) return;
 
+  // Validate input message
+  if (!msg || msg->data.empty()) {
+    RCLCPP_DEBUG(node->get_logger(),
+      "GroundConsistencyLayer: Received empty non-ground point cloud");
+    return;
+  }
+
+  if (msg->point_step == 0) {
+    RCLCPP_WARN(node->get_logger(),
+      "GroundConsistencyLayer: Invalid non-ground point cloud (point_step=0)");
+    return;
+  }
+
   geometry_msgs::msg::TransformStamped tf;
   if (!lookupTF(tf_buffer_, global_frame_, msg->header.frame_id,
                 msg->header.stamp, tf_timeout_, tf)) {
+    RCLCPP_DEBUG(node->get_logger(),
+      "GroundConsistencyLayer: TF lookup failed for non-ground cloud from %s",
+      msg->header.frame_id.c_str());
     return;
   }
 
   sensor_msgs::msg::PointCloud2 cloud_global;
-  tf2::doTransform(*msg, cloud_global, tf);
+  try {
+    tf2::doTransform(*msg, cloud_global, tf);
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(node->get_logger(),
+      "GroundConsistencyLayer: Failed to transform non-ground cloud: %s", e.what());
+    return;
+  }
+
+  // Validate required fields exist
+  if (cloud_global.fields.empty()) {
+    RCLCPP_WARN(node->get_logger(),
+      "GroundConsistencyLayer: Non-ground point cloud has no fields");
+    return;
+  }
 
   std::unordered_map<WorldKey, uint32_t> local_counts;
   local_counts.reserve(4096);
 
-  sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud_global, "x");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud_global, "y");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud_global, "z");
-
   const double res = getResolution();
 
-  // First pass: build local counts only
-  for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
-    WorldKey key = worldKey(*iter_x, *iter_y, res);
-    local_counts[key] += 1u;
+  try {
+    sensor_msgs::PointCloud2ConstIterator<float> iter_x(cloud_global, "x");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_y(cloud_global, "y");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_z(cloud_global, "z");
+
+    // First pass: build local counts only
+    for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
+      WorldKey key = worldKey(*iter_x, *iter_y, res);
+      local_counts[key] += 1u;
+    }
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(node->get_logger(),
+      "GroundConsistencyLayer: Failed to read non-ground cloud fields: %s", e.what());
+    return;
   }
 
   // Lock before touching shared maps
@@ -274,23 +349,28 @@ void GroundConsistencyLayer::nongroundCloudCallback(
   }
 
   // Second pass: update obstacle height stats safely
-  sensor_msgs::PointCloud2ConstIterator<float> iter_x2(cloud_global, "x");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_y2(cloud_global, "y");
-  sensor_msgs::PointCloud2ConstIterator<float> iter_z2(cloud_global, "z");
+  try {
+    sensor_msgs::PointCloud2ConstIterator<float> iter_x2(cloud_global, "x");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_y2(cloud_global, "y");
+    sensor_msgs::PointCloud2ConstIterator<float> iter_z2(cloud_global, "z");
 
-  for (; iter_x2 != iter_x2.end(); ++iter_x2, ++iter_y2, ++iter_z2) {
-    WorldKey key = worldKey(*iter_x2, *iter_y2, res);
+    for (; iter_x2 != iter_x2.end(); ++iter_x2, ++iter_y2, ++iter_z2) {
+      WorldKey key = worldKey(*iter_x2, *iter_y2, res);
 
-    auto min_it = obstacle_min_height_world_.find(key);
-    if (min_it == obstacle_min_height_world_.end()) {
-      obstacle_min_height_world_[key] = *iter_z2;
-      obstacle_max_height_world_[key] = *iter_z2;
-    } else {
-      obstacle_min_height_world_[key] =
-        std::min(obstacle_min_height_world_[key], static_cast<double>(*iter_z2));
-      obstacle_max_height_world_[key] =
-        std::max(obstacle_max_height_world_[key], static_cast<double>(*iter_z2));
+      auto min_it = obstacle_min_height_world_.find(key);
+      if (min_it == obstacle_min_height_world_.end()) {
+        obstacle_min_height_world_[key] = *iter_z2;
+        obstacle_max_height_world_[key] = *iter_z2;
+      } else {
+        obstacle_min_height_world_[key] =
+          std::min(obstacle_min_height_world_[key], static_cast<double>(*iter_z2));
+        obstacle_max_height_world_[key] =
+          std::max(obstacle_max_height_world_[key], static_cast<double>(*iter_z2));
+      }
     }
+  } catch (const std::exception & e) {
+    RCLCPP_ERROR(node->get_logger(),
+      "GroundConsistencyLayer: Failed to process obstacle height stats: %s", e.what());
   }
 }
 
