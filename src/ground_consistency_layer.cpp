@@ -133,19 +133,18 @@ void GroundConsistencyLayer::updateFootprint(
     return;
   }
 
-  // Get robot footprint from costmap
   std::vector<geometry_msgs::msg::Point> footprint = getFootprint();
 
   if (footprint.empty()) {
-    // If no footprint is configured, use a circular default (0.5m radius)
-    const double default_radius = 0.5;
-    for (int angle = 0; angle < 16; ++angle) {
-      geometry_msgs::msg::Point pt;
-      pt.x = default_radius * std::cos(2.0 * M_PI * angle / 16.0);
-      pt.y = default_radius * std::sin(2.0 * M_PI * angle / 16.0);
-      pt.z = 0.0;
-      footprint.push_back(pt);
+    auto node = node_.lock();
+    if (node) {
+      RCLCPP_ERROR(
+        node->get_logger(),
+        "GroundConsistencyLayer: No footprint configured! "
+        "Please set 'footprint' parameter in costmap_2d config. "
+        "Skipping footprint clearing.");
     }
+    return;
   }
 
   // Transform robot footprint to current pose
