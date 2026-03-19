@@ -18,6 +18,7 @@ endif()
 
 add_library(${PROJECT_NAME} SHARED
   src/ground_consistency_layer.cpp
+  src/kpi_tracker.cpp
 )
 
 target_include_directories(${PROJECT_NAME}
