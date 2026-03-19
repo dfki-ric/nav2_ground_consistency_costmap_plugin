@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <cstdint>
+#include <memory>
 
 #include "rclcpp/rclcpp.hpp"
 #include "nav2_costmap_2d/costmap_layer.hpp"
@@ -13,6 +14,8 @@
 
 #include "tf2_ros/buffer.h"
 #include "tf2_ros/transform_listener.h"
+
+#include "nav2_ground_consistency_costmap_plugin/kpi_tracker.hpp"
 
 namespace nav2_ground_consistency_costmap_plugin
 {
@@ -118,6 +121,12 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr nonground_sub_;
 
   std::mutex mutex_;
+
+  // KPI Tracking
+  std::unique_ptr<KPITracker> kpi_tracker_;
+  bool kpi_enabled_{false};
+  uint32_t cells_updated_this_cycle_{0};
+  uint32_t cells_decayed_this_cycle_{0};
 };
 
 }  // namespace nav2_ground_consistency_costmap_plugin

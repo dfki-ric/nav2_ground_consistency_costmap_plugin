@@ -54,6 +54,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("min_clearance", rclcpp::ParameterValue(0.10)); // meters
   declareParameter("robot_height", rclcpp::ParameterValue(1.2));
   declareParameter("footprint_clearing_enabled", rclcpp::ParameterValue(true));
+  declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -68,6 +69,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".min_clearance", min_clearance_);
   node->get_parameter(name_ + ".robot_height", robot_height_);
   node->get_parameter(name_ + ".footprint_clearing_enabled", footprint_clearing_enabled_);
+  node->get_parameter(name_ + ".enable_kpi_logging", kpi_enabled_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
@@ -78,8 +80,17 @@ void GroundConsistencyLayer::onInitialize()
 
   RCLCPP_INFO(node->get_logger(), 
     "GroundConsistencyLayer initialized. global_frame=%s, "
-    "ground_topic=%s, nonground_topic=%s",
-    global_frame_.c_str(), ground_topic_.c_str(), nonground_topic_.c_str());
+    "ground_topic=%s, nonground_topic=%s, enable_kpi=%s",
+    global_frame_.c_str(), ground_topic_.c_str(), nonground_topic_.c_str(),
+    kpi_enabled_ ? "true" : "false");
+
+  // Initialize KPI tracking
+  if (kpi_enabled_) {
+    std::string kpi_file = "/tmp/costmap_kpi_" + name_ + ".csv";
+    kpi_tracker_ = std::make_unique<KPITracker>(kpi_file);
+    RCLCPP_INFO(node->get_logger(),
+      "KPI logging enabled. Output: %s", kpi_file.c_str());
+  }
 
   enabled_ = true;
   current_ = true;
@@ -469,6 +480,17 @@ void GroundConsistencyLayer::updateCosts(
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
+  if (kpi_enabled_) {
+    kpi_tracker_->startUpdateTimer();
+  }
+
+  cells_updated_this_cycle_ = 0;
+  cells_decayed_this_cycle_ = 0;
+
+  // Capture frame counts before integration clears them
+  uint32_t ground_points_this_cycle = ground_counts_frame_.size();
+  uint32_t nonground_points_this_cycle = nonground_counts_frame_.size();
+
   integrateFrameCountsIntoScores();
 
   // Clear robot footprint evidence to prevent self-blocking
@@ -544,6 +566,7 @@ void GroundConsistencyLayer::updateCosts(
       continue; 
     }
     it->second *= gd;
+    cells_decayed_this_cycle_++;
     if (it->second < 1e-3f)
     {
         WorldKey k = it->first;
@@ -571,6 +594,7 @@ void GroundConsistencyLayer::updateCosts(
     }
 
     it->second *= nd;
+    cells_decayed_this_cycle_++;
     if (it->second < 1e-3f)
     {
         WorldKey k = it->first;
@@ -680,6 +704,47 @@ void GroundConsistencyLayer::updateCosts(
     if ((int)mx < min_i || (int)mx >= max_i || (int)my < min_j || (int)my >= max_j) continue;
 
     master_grid.setCost(mx, my, kv.second);
+    cells_updated_this_cycle_++;
+  }
+
+  // Record KPI metrics
+  if (kpi_enabled_ && kpi_tracker_) {
+    double latency_ms = kpi_tracker_->stopUpdateTimer();
+    
+    KPISnapshot snapshot;
+    snapshot.timestamp = std::chrono::system_clock::now();
+    snapshot.update_latency_ms = latency_ms;
+    snapshot.cells_updated = cells_updated_this_cycle_;
+    snapshot.cells_decayed = cells_decayed_this_cycle_;
+    snapshot.total_ground_cells = ground_score_world_.size();
+    snapshot.total_nonground_cells = nonground_score_world_.size();
+    
+    // Memory calculation: realistic per-entry cost for unordered_map
+    // libstdc++ node overhead: ~56 bytes + bucket array overhead (~8 bytes per bucket)
+    size_t mem_bytes = 0;
+    const size_t node_size = 56;      // libstdc++ unordered_map_node size
+    const size_t per_bucket = 8;       // approximate bucket array cost
+    
+    // Helper: calculate unordered_map memory
+    auto map_memory = [&](size_t entries, size_t value_bytes) -> size_t {
+      if (entries == 0) return 0;
+      return entries * (node_size + sizeof(WorldKey) + value_bytes) +
+             std::max(entries, size_t(16)) * per_bucket;
+    };
+    
+    mem_bytes += map_memory(ground_score_world_.size(), sizeof(float));
+    mem_bytes += map_memory(nonground_score_world_.size(), sizeof(float));
+    mem_bytes += map_memory(ground_height_sum_world_.size(), sizeof(double));
+    mem_bytes += map_memory(ground_height_count_world_.size(), sizeof(uint32_t));
+    mem_bytes += map_memory(obstacle_min_height_world_.size(), sizeof(double));
+    mem_bytes += map_memory(obstacle_max_height_world_.size(), sizeof(double));
+    
+    snapshot.memory_usage_mb = mem_bytes / (1024.0 * 1024.0);
+    
+    snapshot.ground_points_processed = ground_points_this_cycle;
+    snapshot.nonground_points_processed = nonground_points_this_cycle;
+    
+    kpi_tracker_->recordSnapshot(snapshot);
   }
 }
 
