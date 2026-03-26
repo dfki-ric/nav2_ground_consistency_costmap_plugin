@@ -1,5 +1,5 @@
-
 # nav2_ground_consistency_costmap_plugin
+![ground_consistency_layer](images/ground_consistency_layer.gif)
 
 ## Overview
 
