@@ -221,14 +221,9 @@ This plugin uses **passive temporal decay** for clearing, not active raytracing.
    efficient for dense point clouds.
 
 4. **Dynamic environment handling**: Decay naturally "forgets" stale obstacles:
-   - `ground_decay=0.90`: Ground evidence persists longer (environment stable)
-   - `nonground_decay=0.98`: Obstacle evidence decays slower (cautious)
+   - `ground_decay=0.92`: Ground evidence decays slower (environment stable)
+   - `nonground_decay=0.90`: Obstacle evidence decays faster (cautious)
    Users can tune decay rates for their environment dynamics.
-
-5. **Complementary with obstacle_layer**: In a typical Nav2 stack, this layer runs
-   *alongside* obstacle_layer which provides active raytracing and clearing. Together
-   they provide both semantic understanding (this layer) and active free-space clearing
-   (obstacle_layer).
 
 ### Input Format: PointCloud2-Only (By Design)
 
@@ -281,7 +276,7 @@ This plugin includes **active robot footprint clearing** to ensure the robot nev
 **Footprint Configuration:**
 
 - If a footprint is configured in your costmap (via Nav2 parameter `footprint`), it will be used
-- If no footprint is configured, a **default circular footprint (0.5m radius)** is automatically used
+- If no footprint is configured then the clearance operation will be skipped.
 - To customize, add this to your costmap config:
   ```yaml
   costmap:
@@ -296,7 +291,7 @@ Set `footprint_clearing_enabled: false` in the layer config to disable this feat
 
 ## License
 
-See LICENSE file or contact maintainer.
+See LICENSE file.
 
 ---
 
