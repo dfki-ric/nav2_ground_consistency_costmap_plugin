@@ -16,8 +16,6 @@ It integrates ground segmentation output directly into Nav2's costmap stack and 
 - **Rolling window support**: Efficiently manages costmap updates with automatic memory management
 - **Thread-safe integration**: Asynchronous point cloud callbacks with mutex protection
 
----
-
 ## Topics
 
 The plugin subscribes to two point cloud topics:
@@ -28,8 +26,6 @@ The plugin subscribes to two point cloud topics:
 | `/nonground_points` | `sensor_msgs/msg/PointCloud2` | Non-ground/obstacle-classified points |
 
 Both clouds are automatically transformed into the costmap's global frame using TF2.
-
----
 
 ## Parameters
 
@@ -51,8 +47,6 @@ Configuration parameters control the evidence accumulation, decay rates, and cla
 | `tf_timeout` | `0.1` | double | TF lookup timeout [seconds] for cloud transformation |
 | `footprint_clearing_enabled` | `true` | bool | Enable clearing of robot footprint polygon to prevent self-blocking |
 | `enable_kpi_logging` | `false` | bool | Enable KPI tracking and CSV logging to `/tmp/costmap_kpi_*.csv` |
-
----
 
 ## Occupancy Model
 
@@ -93,8 +87,6 @@ step_height = obstacle_min_height - ground_avg_height
 obstacle_height = obstacle_max_height - ground_avg_height
 ```
 
----
-
 ## Data Structure & Memory Management
 
 The plugin uses efficient world-frame keying:
@@ -112,15 +104,11 @@ The plugin uses efficient world-frame keying:
   - Scores below noise threshold (1e-3) are erased with associated data
   - Prevents unbounded memory growth
 
----
-
 ## Thread Safety
 
 - **Asynchronous callbacks**: Ground and nonground cloud callbacks run in ROS 2's message thread
 - **Mutex protection**: All shared data structures protected by `std::lock_guard<std::mutex>`
 - **Callback ordering**: Frame counts accumulated during callbacks, integrated into scores during `updateCosts()`
-
----
 
 ## Build & Installation
 
@@ -130,8 +118,6 @@ The plugin uses efficient world-frame keying:
 colcon build --packages-select nav2_ground_consistency_costmap_plugin --cmake-args -DCMAKE_BUILD_TYPE=RELEASE
 source install/setup.bash
 ```
-
----
 
 ## Nav2 Configuration Example
 
@@ -166,8 +152,6 @@ local_costmap:
 for complementary raw sensor data feedback. The footprint clearing prevents the robot from
 self-blocking when traversing difficult terrain detected by ground segmentation.
 
----
-
 ## Dependencies
 
 - **ROS 2**: Humble or newer (tested with Humble, Jazzy)
@@ -176,8 +160,6 @@ self-blocking when traversing difficult terrain detected by ground segmentation.
 - **tf2 / tf2_ros**: Transform tree lookup
 - **sensor_msgs**: PointCloud2 message type
 - **geometry_msgs**: For transformation operations
-
----
 
 ## Tuning Guide
 
@@ -197,8 +179,6 @@ self-blocking when traversing difficult terrain detected by ground segmentation.
 - If lagging, check point cloud frequency and density
 - Adjust `max_score` to prevent score explosion
 - Monitor memory with `ros2 node info /costmap_node`
-
----
 
 ## Design Rationale
 
@@ -287,19 +267,13 @@ This plugin includes **active robot footprint clearing** to ensure the robot nev
 
 Set `footprint_clearing_enabled: false` in the layer config to disable this feature (not recommended for safety).
 
----
-
 ## License
 
 See LICENSE file.
 
----
-
 ## Contributing
 
-Contributions and bug reports are welcome. Please ensure code passes linting and tests before submission.
-
----
+Contributions and bug reports are welcome.
 
 ## Funding
 This package was initiated and is currently developed at the Robotics Innovation Center of the German Research Center for Artificial Intelligence (DFKI) in Bremen. The development was started in the scope of the Robdekon2 (50RA1406), which has been funded from the German Federal Ministry for Research, Technology, and Space.
