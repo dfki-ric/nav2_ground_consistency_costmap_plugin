@@ -40,16 +40,17 @@ Configuration parameters control the evidence accumulation, decay rates, and cla
 | `ground_points_topic` | `/ground_points` | string | Topic name for ground point cloud |
 | `nonground_points_topic` | `/nonground_points` | string | Topic name for obstacle point cloud |
 | `ground_inc` | `1.0` | double | Evidence increment per ground point per update |
-| `nonground_inc` | `2.0` | double | Evidence increment per obstacle point per update |
-| `ground_decay` | `0.90` | double | Multiplicative decay factor for ground evidence per costmap update (0.0–1.0) |
-| `nonground_decay` | `0.98` | double | Multiplicative decay factor for obstacle evidence per costmap update (0.0–1.0) |
-| `nonground_occ_thresh` | `3.0` | double | Minimum obstacle score required to trigger height-based classification |
-| `nonground_prob_thresh` | `0.7` | double | Minimum obstacle probability (0.0–1.0) required for lethal/free classification |
+| `nonground_inc` | `1.5` | double | Evidence increment per obstacle point per update |
+| `ground_decay` | `0.92` | double | Multiplicative decay factor for ground evidence per costmap update (0.0–1.0) |
+| `nonground_decay` | `0.90` | double | Multiplicative decay factor for obstacle evidence per costmap update (0.0–1.0) |
+| `nonground_occ_thresh` | `2.0` | double | Minimum obstacle score required to trigger height-based classification |
+| `nonground_prob_thresh` | `0.750` | double | Minimum obstacle probability (0.0–1.0) required for lethal/free classification |
 | `max_score` | `1000.0` | double | Upper clamp limit for score accumulation |
-| `min_clearance` | `0.10` | double | Maximum obstacle height [m] considered "small" (passable under) |
+| `min_clearance` | `0.1` | double | Maximum obstacle height [m] considered "small" (passable under) |
 | `robot_height` | `1.2` | double | Robot height [m] used for tunnel detection (obstacles above this are tunnels) |
 | `tf_timeout` | `0.1` | double | TF lookup timeout [seconds] for cloud transformation |
 | `footprint_clearing_enabled` | `true` | bool | Enable clearing of robot footprint polygon to prevent self-blocking |
+| `enable_kpi_logging` | `false` | bool | Enable KPI tracking and CSV logging to `/tmp/costmap_kpi_*.csv` |
 
 ---
 
@@ -126,7 +127,7 @@ The plugin uses efficient world-frame keying:
 ### Build the package:
 
 ```bash
-colcon build --packages-select nav2_ground_consistency_costmap_plugin
+colcon build --packages-select nav2_ground_consistency_costmap_plugin --cmake-args -DCMAKE_BUILD_TYPE=RELEASE
 source install/setup.bash
 ```
 
@@ -149,17 +150,17 @@ local_costmap:
       ground_points_topic: "/ground_points"
       nonground_points_topic: "/nonground_points"
       ground_inc: 1.0
-      nonground_inc: 2.0
-      ground_decay: 0.90
-      nonground_decay: 0.98
-      nonground_occ_thresh: 3.0
-      nonground_prob_thresh: 0.7
+      nonground_inc: 1.5
+      ground_decay: 0.92
+      nonground_decay: 0.90
+      nonground_occ_thresh: 2.0
+      nonground_prob_thresh: 0.750
       max_score: 1000.0
       min_clearance: 0.1              # 10 cm: small obstacles max height
       robot_height: 1.2               # 1.2 m: tunnel detection threshold
       tf_timeout: 0.1
       footprint_clearing_enabled: true # Clear robot footprint polygon
-
+      enable_kpi_logging: false
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
       # ... standard inflation layer config ...
