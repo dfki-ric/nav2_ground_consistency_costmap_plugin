@@ -140,7 +140,7 @@ Add the layer to your Nav2 costmap configuration:
 ```yaml
 local_costmap:
   local_costmap:
-    plugins: ["static_layer", "ground_consistency_layer", "inflation_layer"]
+    plugins: ["ground_consistency_layer", "inflation_layer"]
     static_layer:
       plugin: "nav2_costmap_2d::StaticLayer"
       map_subscribe_transient_local: true
