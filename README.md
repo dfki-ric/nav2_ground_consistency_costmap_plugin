@@ -141,10 +141,6 @@ Add the layer to your Nav2 costmap configuration:
 local_costmap:
   local_costmap:
     plugins: ["ground_consistency_layer", "inflation_layer"]
-    static_layer:
-      plugin: "nav2_costmap_2d::StaticLayer"
-      map_subscribe_transient_local: true
-
     ground_consistency_layer:
       plugin: "nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer"
       ground_points_topic: "/ground_points"
