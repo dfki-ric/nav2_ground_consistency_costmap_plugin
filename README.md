@@ -300,3 +300,6 @@ See LICENSE file.
 Contributions and bug reports are welcome. Please ensure code passes linting and tests before submission.
 
 ---
+
+## Funding
+This package was initiated and is currently developed at the Robotics Innovation Center of the German Research Center for Artificial Intelligence (DFKI) in Bremen. The development was started in the scope of the Robdekon2 (50RA1406), which has been funded from the German Federal Ministry for Research, Technology, and Space.
