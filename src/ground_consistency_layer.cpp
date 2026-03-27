@@ -408,10 +408,26 @@ void GroundConsistencyLayer::updateCosts(
     const int32_t max_xi = static_cast<int32_t>(std::floor(fp_max_x / res));
     const int32_t max_yi = static_cast<int32_t>(std::floor(fp_max_y / res));
 
-    // Remove evidence in footprint area
+    // Remove evidence only for cells whose center lies inside the footprint polygon
     for (int32_t xi = min_xi; xi <= max_xi; ++xi) {
       for (int32_t yi = min_yi; yi <= max_yi; ++yi) {
-        cells_.erase(packXY(xi, yi));
+        double px = (static_cast<double>(xi) + 0.5) * res;
+        double py = (static_cast<double>(yi) + 0.5) * res;
+
+        // Ray-casting point-in-polygon test
+        bool inside = false;
+        size_t n = transformed_footprint_.size();
+        for (size_t i = 0, j = n - 1; i < n; j = i++) {
+          const auto & a = transformed_footprint_[i];
+          const auto & b = transformed_footprint_[j];
+          if ((a.y > py) != (b.y > py) &&
+              px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x) {
+            inside = !inside;
+          }
+        }
+        if (inside) {
+          cells_.erase(packXY(xi, yi));
+        }
       }
     }
 
