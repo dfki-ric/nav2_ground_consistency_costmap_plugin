@@ -142,14 +142,6 @@ void GroundConsistencyLayer::matchSize()
   nav2_costmap_2d::Costmap2D * master = layered_costmap_->getCostmap();
   resizeMap(master->getSizeInCellsX(), master->getSizeInCellsY(), master->getResolution(),
             master->getOriginX(), master->getOriginY());
-
-  // Only clear per-frame accumulators; persistent scores use world-frame keys
-  // and survive origin changes without shifting.
-  std::lock_guard<std::mutex> lock(mutex_);
-  for (auto & [key, cell] : cells_) {
-    cell.ground_count_frame = 0;
-    cell.nonground_count_frame = 0;
-  }
 }
 
 void GroundConsistencyLayer::reset()
