@@ -141,6 +141,7 @@ void GroundConsistencyLayer::matchSize()
   nav2_costmap_2d::Costmap2D * master = layered_costmap_->getCostmap();
   resizeMap(master->getSizeInCellsX(), master->getSizeInCellsY(), master->getResolution(),
             master->getOriginX(), master->getOriginY());
+  cells_.reserve(master->getSizeInCellsX() * master->getSizeInCellsY());
 }
 
 void GroundConsistencyLayer::reset()
