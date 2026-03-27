@@ -36,59 +36,62 @@ if df.empty:
     print("No valid data rows found")
     sys.exit(1)
 
+# Compute time relative to start in seconds
+t0 = df['timestamp'].iloc[0]
+df['elapsed_s'] = (df['timestamp'] - t0).dt.total_seconds()
+
 # Create figure with subplots
-fig, axes = plt.subplots(3, 2, figsize=(15, 12))
+fig, axes = plt.subplots(3, 2, figsize=(15, 13))
 fig.suptitle('Costmap Layer KPI Metrics Over Time', fontsize=16, fontweight='bold')
 
 # Format x-axis helper
 def format_xaxis(ax):
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%H:%M:%S'))
-    ax.tick_params(axis='x', rotation=45)
     ax.grid(True, alpha=0.3)
 
 # Plot 1: Total Cycle Latency
-axes[0, 0].plot(df['timestamp'], df['total_cycle_ms'], 'b-', linewidth=1.5)
+axes[0, 0].plot(df['elapsed_s'], df['total_cycle_ms'], 'b-', linewidth=1.5)
 axes[0, 0].set_ylabel('Latency (ms)', fontweight='bold')
 axes[0, 0].set_title('Total Cycle Time (updateBounds + updateCosts)')
 format_xaxis(axes[0, 0])
 
-# Plot 2: Cells Updated vs Decayed
-axes[0, 1].plot(df['timestamp'], df['cells_updated'], 'g-', label='Updated', linewidth=1.5)
-axes[0, 1].plot(df['timestamp'], df['cells_decayed'], 'r-', label='Decayed', linewidth=1.5)
+# Plot 2: Cells Updated vs Decayed (filter out zero-decay cycles)
+axes[0, 1].plot(df['elapsed_s'], df['cells_updated'], 'g-', label='Updated', linewidth=1.5)
+df_decay = df[df['cells_decayed'] > 0]
+axes[0, 1].plot(df_decay['elapsed_s'], df_decay['cells_decayed'], 'r-', label='Decayed', linewidth=1.5)
 axes[0, 1].set_ylabel('Cell Count', fontweight='bold')
 axes[0, 1].set_title('Cells Updated vs Decayed')
 axes[0, 1].legend()
 format_xaxis(axes[0, 1])
 
 # Plot 3: Total Ground Cells
-axes[1, 0].plot(df['timestamp'], df['total_ground_cells'], 'brown', linewidth=1.5)
+axes[1, 0].plot(df['elapsed_s'], df['total_ground_cells'], 'brown', linewidth=1.5)
 axes[1, 0].set_ylabel('Cell Count', fontweight='bold')
 axes[1, 0].set_title('Total Ground Score Map Size')
 format_xaxis(axes[1, 0])
 
 # Plot 4: Total Nonground Cells
-axes[1, 1].plot(df['timestamp'], df['total_nonground_cells'], 'purple', linewidth=1.5)
+axes[1, 1].plot(df['elapsed_s'], df['total_nonground_cells'], 'purple', linewidth=1.5)
 axes[1, 1].set_ylabel('Cell Count', fontweight='bold')
 axes[1, 1].set_title('Total Nonground Score Map Size')
 format_xaxis(axes[1, 1])
 
 # Plot 5: Memory Usage
-axes[2, 0].plot(df['timestamp'], df['memory_usage_mb'], 'orange', linewidth=1.5)
+axes[2, 0].plot(df['elapsed_s'], df['memory_usage_mb'], 'orange', linewidth=1.5)
 axes[2, 0].set_ylabel('Memory (MB)', fontweight='bold')
-axes[2, 0].set_xlabel('Time (HH:MM:SS)', fontweight='bold')
+axes[2, 0].set_xlabel('Time (s)', fontweight='bold')
 axes[2, 0].set_title('Memory Usage')
 format_xaxis(axes[2, 0])
 
 # Plot 6: Points Processed
-axes[2, 1].plot(df['timestamp'], df['ground_points'], 'brown', label='Ground', linewidth=1.5)
-axes[2, 1].plot(df['timestamp'], df['nonground_points'], 'purple', label='Nonground', linewidth=1.5)
+axes[2, 1].plot(df['elapsed_s'], df['ground_points'], 'brown', label='Ground', linewidth=1.5)
+axes[2, 1].plot(df['elapsed_s'], df['nonground_points'], 'purple', label='Nonground', linewidth=1.5)
 axes[2, 1].set_ylabel('Point Count', fontweight='bold')
-axes[2, 1].set_xlabel('Time (HH:MM:SS)', fontweight='bold')
+axes[2, 1].set_xlabel('Time (s)', fontweight='bold')
 axes[2, 1].set_title('Points Processed per Update')
 axes[2, 1].legend()
 format_xaxis(axes[2, 1])
 
-plt.tight_layout()
+plt.tight_layout(h_pad=3.0, rect=[0, 0.03, 1, 0.96])
 plt.savefig('/tmp/costmap_kpi_analysis.png', dpi=150, bbox_inches='tight')
 print("✓ Saved plot to: /tmp/costmap_kpi_analysis.png")
 
