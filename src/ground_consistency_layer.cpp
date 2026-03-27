@@ -143,25 +143,19 @@ void GroundConsistencyLayer::matchSize()
   resizeMap(master->getSizeInCellsX(), master->getSizeInCellsY(), master->getResolution(),
             master->getOriginX(), master->getOriginY());
 
+  // Only clear per-frame accumulators; persistent scores use world-frame keys
+  // and survive origin changes without shifting.
   std::lock_guard<std::mutex> lock(mutex_);
-  ground_counts_frame_.clear();
-  nonground_counts_frame_.clear();
-  ground_score_world_.clear();
-  nonground_score_world_.clear();
-
-  ground_height_count_world_.clear();
-  ground_height_sum_world_.clear();
-  obstacle_min_height_world_.clear();
-  obstacle_max_height_world_.clear();
+  for (auto & [key, cell] : cells_) {
+    cell.ground_count_frame = 0;
+    cell.nonground_count_frame = 0;
+  }
 }
 
 void GroundConsistencyLayer::reset()
 {
   std::lock_guard<std::mutex> lock(mutex_);
-  ground_counts_frame_.clear();
-  nonground_counts_frame_.clear();
-  ground_score_world_.clear();
-  nonground_score_world_.clear();
+  cells_.clear();
 }
 
 void GroundConsistencyLayer::updateBounds(
@@ -182,23 +176,11 @@ void GroundConsistencyLayer::updateBounds(
   {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    // Find bounds from ground evidence
-    for (const auto& kv : ground_score_world_) {
-      int32_t xi = unpackX(kv.first);
-      int32_t yi = unpackY(kv.first);
-      double wx = (xi + 0.5) * getResolution();
-      double wy = (yi + 0.5) * getResolution();
+    for (const auto & [key, cell] : cells_) {
+      if (cell.ground_score <= 0.0f && cell.nonground_score <= 0.0f) continue;
 
-      local_min_x = std::min(local_min_x, wx);
-      local_max_x = std::max(local_max_x, wx);
-      local_min_y = std::min(local_min_y, wy);
-      local_max_y = std::max(local_max_y, wy);
-    }
-
-    // Find bounds from obstacle evidence
-    for (const auto& kv : nonground_score_world_) {
-      int32_t xi = unpackX(kv.first);
-      int32_t yi = unpackY(kv.first);
+      int32_t xi = unpackX(key);
+      int32_t yi = unpackY(key);
       double wx = (xi + 0.5) * getResolution();
       double wy = (yi + 0.5) * getResolution();
 
@@ -339,12 +321,12 @@ void GroundConsistencyLayer::groundCloudCallback(
     return;
   }
 
-  // Lock before touching shared maps
+  // Lock before touching shared map
   std::lock_guard<std::mutex> lock(mutex_);
 
   // Update frame counts
   for (const auto& kv : local_counts) {
-    ground_counts_frame_[kv.first] += kv.second;
+    cells_[kv.first].ground_count_frame += kv.second;
   }
 
   // Second pass: update height statistics safely
@@ -355,8 +337,9 @@ void GroundConsistencyLayer::groundCloudCallback(
 
     for (; iter_x2 != iter_x2.end(); ++iter_x2, ++iter_y2, ++iter_z2) {
       WorldKey key = worldKey(*iter_x2, *iter_y2, res);
-      ground_height_sum_world_[key] += *iter_z2;
-      ground_height_count_world_[key] += 1u;
+      auto & cell = cells_[key];
+      cell.ground_height_sum += *iter_z2;
+      cell.ground_height_count += 1u;
     }
   } catch (const std::exception & e) {
     RCLCPP_ERROR(node->get_logger(),
@@ -429,12 +412,12 @@ void GroundConsistencyLayer::nongroundCloudCallback(
     return;
   }
 
-  // Lock before touching shared maps
+  // Lock before touching shared map
   std::lock_guard<std::mutex> lock(mutex_);
 
   // Update frame counts
   for (const auto& kv : local_counts) {
-    nonground_counts_frame_[kv.first] += kv.second;
+    cells_[kv.first].nonground_count_frame += kv.second;
   }
 
   // Second pass: update obstacle height stats safely
@@ -445,17 +428,9 @@ void GroundConsistencyLayer::nongroundCloudCallback(
 
     for (; iter_x2 != iter_x2.end(); ++iter_x2, ++iter_y2, ++iter_z2) {
       WorldKey key = worldKey(*iter_x2, *iter_y2, res);
-
-      auto min_it = obstacle_min_height_world_.find(key);
-      if (min_it == obstacle_min_height_world_.end()) {
-        obstacle_min_height_world_[key] = *iter_z2;
-        obstacle_max_height_world_[key] = *iter_z2;
-      } else {
-        obstacle_min_height_world_[key] =
-          std::min(obstacle_min_height_world_[key], static_cast<double>(*iter_z2));
-        obstacle_max_height_world_[key] =
-          std::max(obstacle_max_height_world_[key], static_cast<double>(*iter_z2));
-      }
+      auto & cell = cells_[key];
+      cell.obstacle_min_height = std::min(cell.obstacle_min_height, static_cast<double>(*iter_z2));
+      cell.obstacle_max_height = std::max(cell.obstacle_max_height, static_cast<double>(*iter_z2));
     }
   } catch (const std::exception & e) {
     RCLCPP_ERROR(node->get_logger(),
@@ -465,18 +440,18 @@ void GroundConsistencyLayer::nongroundCloudCallback(
 
 void GroundConsistencyLayer::integrateFrameCountsIntoScores()
 {
-  for (const auto & kv : ground_counts_frame_) {
-    float & s = ground_score_world_[kv.first];
-    s = static_cast<float>(std::min<double>(max_score_, s + kv.second * ground_inc_));
+  for (auto & [key, cell] : cells_) {
+    if (cell.ground_count_frame > 0) {
+      cell.ground_score = static_cast<float>(
+        std::min<double>(max_score_, cell.ground_score + cell.ground_count_frame * ground_inc_));
+      cell.ground_count_frame = 0;
+    }
+    if (cell.nonground_count_frame > 0) {
+      cell.nonground_score = static_cast<float>(
+        std::min<double>(max_score_, cell.nonground_score + cell.nonground_count_frame * nonground_inc_));
+      cell.nonground_count_frame = 0;
+    }
   }
-
-  for (const auto & kv : nonground_counts_frame_) {
-    float & s = nonground_score_world_[kv.first];
-    s = static_cast<float>(std::min<double>(max_score_, s + kv.second * nonground_inc_));
-  }
-
-  ground_counts_frame_.clear();
-  nonground_counts_frame_.clear();
 }
 
 void GroundConsistencyLayer::updateCosts(
@@ -489,8 +464,12 @@ void GroundConsistencyLayer::updateCosts(
   cells_decayed_this_cycle_ = 0;
 
   // Capture frame counts before integration clears them
-  uint32_t ground_points_this_cycle = ground_counts_frame_.size();
-  uint32_t nonground_points_this_cycle = nonground_counts_frame_.size();
+  uint32_t ground_points_this_cycle = 0;
+  uint32_t nonground_points_this_cycle = 0;
+  for (const auto & [key, cell] : cells_) {
+    ground_points_this_cycle += cell.ground_count_frame;
+    nonground_points_this_cycle += cell.nonground_count_frame;
+  }
 
   integrateFrameCountsIntoScores();
 
@@ -515,16 +494,10 @@ void GroundConsistencyLayer::updateCosts(
     const int32_t max_xi = static_cast<int32_t>(std::floor(fp_max_x / res));
     const int32_t max_yi = static_cast<int32_t>(std::floor(fp_max_y / res));
 
-    // Remove evidence scores in footprint area
+    // Remove evidence in footprint area
     for (int32_t xi = min_xi; xi <= max_xi; ++xi) {
       for (int32_t yi = min_yi; yi <= max_yi; ++yi) {
-        WorldKey key = packXY(xi, yi);
-        ground_score_world_.erase(key);
-        nonground_score_world_.erase(key);
-        ground_height_count_world_.erase(key);
-        ground_height_sum_world_.erase(key);
-        obstacle_min_height_world_.erase(key);
-        obstacle_max_height_world_.erase(key);
+        cells_.erase(packXY(xi, yi));
       }
     }
 
@@ -558,154 +531,95 @@ void GroundConsistencyLayer::updateCosts(
     wy = (static_cast<double>(yi) + 0.5) * res;
   };
 
-  // Decay both maps (within window) + erase tiny entries
-  for (auto it = ground_score_world_.begin(); it != ground_score_world_.end(); ) {
-    double wx, wy;
-    cellCenter(unpackX(it->first), unpackY(it->first), wx, wy);
-    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) {
-      it = ground_score_world_.erase(it);
-      continue; 
-    }
-    it->second *= gd;
-    cells_decayed_this_cycle_++;
-    if (it->second < 1e-3f)
-    {
-        WorldKey k = it->first;
+  auto inWindow = [&](double wx, double wy) -> bool {
+    return wx >= min_wx && wx <= max_wx && wy >= min_wy && wy <= max_wy;
+  };
 
-        // erase associated terrain data
-        ground_height_sum_world_.erase(k);
-        ground_height_count_world_.erase(k);
-        obstacle_min_height_world_.erase(k);
-        obstacle_max_height_world_.erase(k);
+  // Single pass: decay, compute costs, erase dead cells
+  size_t total_ground_cells = 0;
+  size_t total_nonground_cells = 0;
 
-        it = ground_score_world_.erase(it);
-    }
-    else
-    {
-        ++it;
-    }
-  }
-
-  for (auto it = nonground_score_world_.begin(); it != nonground_score_world_.end(); ) {
-    double wx, wy;
-    cellCenter(unpackX(it->first), unpackY(it->first), wx, wy);
-    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) {
-      it = nonground_score_world_.erase(it);
-      continue; 
-    }
-
-    it->second *= nd;
-    cells_decayed_this_cycle_++;
-    if (it->second < 1e-3f)
-    {
-        WorldKey k = it->first;
-
-        // erase associated terrain data
-        ground_height_sum_world_.erase(k);
-        ground_height_count_world_.erase(k);
-        obstacle_min_height_world_.erase(k);
-        obstacle_max_height_world_.erase(k);
-
-        it = nonground_score_world_.erase(it);
-    }
-    else
-    {
-        ++it;
-    }
-  }
-
-  // Iterate union of keys in-window and compute p_occ
-  // We'll build a temporary set of keys (cheap enough for your window sizes).
-  std::unordered_map<WorldKey, uint8_t> costs;
-  costs.reserve(4096);
-
-  auto add_key = [&](WorldKey k) {
-    const int32_t xi = unpackX(k);
-    const int32_t yi = unpackY(k);
-
+  for (auto it = cells_.begin(); it != cells_.end(); ) {
+    auto & cell = it->second;
+    int32_t xi = unpackX(it->first);
+    int32_t yi = unpackY(it->first);
     double wx, wy;
     cellCenter(xi, yi, wx, wy);
-    if (wx < min_wx || wx > max_wx || wy < min_wy || wy > max_wy) return;
 
-    float g = 0.0f;
-    float ng = 0.0f;
+    // Erase out-of-window cells
+    if (!inWindow(wx, wy)) {
+      it = cells_.erase(it);
+      continue;
+    }
 
-    if (auto itg = ground_score_world_.find(k); itg != ground_score_world_.end()) g = itg->second;
-    if (auto itn = nonground_score_world_.find(k); itn != nonground_score_world_.end()) ng = itn->second;
+    // Decay scores
+    if (cell.ground_score > 0.0f) {
+      cell.ground_score *= gd;
+      cells_decayed_this_cycle_++;
+    }
+    if (cell.nonground_score > 0.0f) {
+      cell.nonground_score *= nd;
+      cells_decayed_this_cycle_++;
+    }
 
-    uint8_t cost{0};
+    // Erase cells with no remaining evidence
+    if (cell.ground_score < 1e-3f && cell.nonground_score < 1e-3f) {
+      it = cells_.erase(it);
+      continue;
+    }
 
+    // Clamp tiny scores to zero
+    if (cell.ground_score < 1e-3f) cell.ground_score = 0.0f;
+    if (cell.nonground_score < 1e-3f) cell.nonground_score = 0.0f;
+
+    // Count for KPI
+    if (cell.ground_score > 0.0f) total_ground_cells++;
+    if (cell.nonground_score > 0.0f) total_nonground_cells++;
+
+    // Compute cost
+    float g = cell.ground_score;
+    float ng = cell.nonground_score;
     const float denom = ng + g + eps;
     const float p_occ = ng / denom;
-    cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
+    uint8_t cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
 
     bool make_lethal = false;
     bool make_free = false;
-    if (ng >= oth && p_occ > pth)
-    {
-        double ground_avg = 0.0;
-        auto it_sum = ground_height_sum_world_.find(k);
-        auto it_cnt = ground_height_count_world_.find(k);
-        if (it_sum != ground_height_sum_world_.end() &&
-            it_cnt != ground_height_count_world_.end() &&
-            it_cnt->second > 0u)
-        {
-          ground_avg = it_sum->second / static_cast<double>(it_cnt->second);
-        }
-        double obs_min = 0.0;
-        double obs_max = 0.0;
-        if (obstacle_min_height_world_.count(k))
-        {
-            obs_min = obstacle_min_height_world_[k];
-            obs_max = obstacle_max_height_world_[k];
-        }
+    if (ng >= oth && p_occ > pth) {
+      double ground_avg = 0.0;
+      if (cell.ground_height_count > 0u) {
+        ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
+      }
 
-        double step_height = obs_min - ground_avg;
-        double obstacle_height = obs_max - ground_avg;
+      double step_height = cell.obstacle_min_height - ground_avg;
+      double obstacle_height = cell.obstacle_max_height - ground_avg;
 
-        bool is_tunnel = step_height > robot_height_;
-        bool is_small_obstacle = obstacle_height < min_clearance_;
+      bool is_tunnel = step_height > robot_height_;
+      bool is_small_obstacle = obstacle_height < min_clearance_;
 
-        if (is_tunnel || is_small_obstacle)
-        {
-          make_free = true;   // explicit override to free
-        }
-        else
-        {
-          make_lethal = true; // confirmed blocking
-        }
+      if (is_tunnel || is_small_obstacle) {
+        make_free = true;
+      } else {
+        make_lethal = true;
+      }
     }
 
-    // Apply overrides
-    if (make_lethal)
-    {
-        cost = nav2_costmap_2d::LETHAL_OBSTACLE;
-    }
-    else if (make_free)
-    {
-        cost = nav2_costmap_2d::FREE_SPACE;
+    if (make_lethal) {
+      cost = nav2_costmap_2d::LETHAL_OBSTACLE;
+    } else if (make_free) {
+      cost = nav2_costmap_2d::FREE_SPACE;
     }
 
-    costs[k] = cost;
-  };
-
-  for (const auto & kv : ground_score_world_)   add_key(kv.first);
-  for (const auto & kv : nonground_score_world_) add_key(kv.first);
-
-  //Write costs into master grid
-  for (const auto & kv : costs) {
-    const int32_t xi = unpackX(kv.first);
-    const int32_t yi = unpackY(kv.first);
-
-    double wx, wy;
-    cellCenter(xi, yi, wx, wy);
-
+    // Write cost to master grid
     unsigned int mx, my;
-    if (!master_grid.worldToMap(wx, wy, mx, my)) continue;
-    if ((int)mx < min_i || (int)mx >= max_i || (int)my < min_j || (int)my >= max_j) continue;
+    if (master_grid.worldToMap(wx, wy, mx, my)) {
+      if ((int)mx >= min_i && (int)mx < max_i && (int)my >= min_j && (int)my < max_j) {
+        master_grid.setCost(mx, my, cost);
+        cells_updated_this_cycle_++;
+      }
+    }
 
-    master_grid.setCost(mx, my, kv.second);
-    cells_updated_this_cycle_++;
+    ++it;
   }
 
   // Record KPI metrics
@@ -715,29 +629,14 @@ void GroundConsistencyLayer::updateCosts(
     snapshot.total_cycle_latency_ms = kpi_tracker_->getTotalTime();
     snapshot.cells_updated = cells_updated_this_cycle_;
     snapshot.cells_decayed = cells_decayed_this_cycle_;
-    snapshot.total_ground_cells = ground_score_world_.size();
-    snapshot.total_nonground_cells = nonground_score_world_.size();
+    snapshot.total_ground_cells = total_ground_cells;
+    snapshot.total_nonground_cells = total_nonground_cells;
     
-    // Memory calculation: realistic per-entry cost for unordered_map
-    // libstdc++ node overhead: ~56 bytes + bucket array overhead (~8 bytes per bucket)
-    size_t mem_bytes = 0;
-    const size_t node_size = 56;      // libstdc++ unordered_map_node size
-    const size_t per_bucket = 8;       // approximate bucket array cost
-    
-    // Helper: calculate unordered_map memory
-    auto map_memory = [&](size_t entries, size_t value_bytes) -> size_t {
-      if (entries == 0) return 0;
-      return entries * (node_size + sizeof(WorldKey) + value_bytes) +
-             std::max(entries, size_t(16)) * per_bucket;
-    };
-    
-    mem_bytes += map_memory(ground_score_world_.size(), sizeof(float));
-    mem_bytes += map_memory(nonground_score_world_.size(), sizeof(float));
-    mem_bytes += map_memory(ground_height_sum_world_.size(), sizeof(double));
-    mem_bytes += map_memory(ground_height_count_world_.size(), sizeof(uint32_t));
-    mem_bytes += map_memory(obstacle_min_height_world_.size(), sizeof(double));
-    mem_bytes += map_memory(obstacle_max_height_world_.size(), sizeof(double));
-    
+    // Memory: single map with CellData struct + bucket overhead
+    size_t entries = cells_.size();
+    const size_t node_overhead = 56;  // libstdc++ hash node
+    size_t mem_bytes = entries * (node_overhead + sizeof(WorldKey) + sizeof(CellData)) +
+                       std::max(entries, size_t(16)) * 8;  // bucket array
     snapshot.memory_usage_mb = mem_bytes / (1024.0 * 1024.0);
     
     snapshot.ground_points_processed = ground_points_this_cycle;

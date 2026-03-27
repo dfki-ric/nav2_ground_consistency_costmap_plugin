@@ -6,6 +6,7 @@
 #include <vector>
 #include <cstdint>
 #include <memory>
+#include <limits>
 
 #include "rclcpp/rclcpp.hpp"
 #include "nav2_costmap_2d/costmap_layer.hpp"
@@ -103,19 +104,19 @@ private:
   std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
 
-  // Per-frame counts in stable world grid (integrated once per update cycle)
-  std::unordered_map<WorldKey, uint32_t> ground_counts_frame_;
-  std::unordered_map<WorldKey, uint32_t> nonground_counts_frame_;
+  // All per-cell data in a single struct (one hash lookup, one allocation)
+  struct CellData {
+    float ground_score{0.0f};
+    float nonground_score{0.0f};
+    uint32_t ground_height_count{0};
+    double ground_height_sum{0.0};
+    double obstacle_min_height{std::numeric_limits<double>::max()};
+    double obstacle_max_height{std::numeric_limits<double>::lowest()};
+    uint32_t ground_count_frame{0};
+    uint32_t nonground_count_frame{0};
+  };
 
-  // Persistent scores in stable world grid
-  std::unordered_map<WorldKey, float> ground_score_world_;
-  std::unordered_map<WorldKey, float> nonground_score_world_;
-
-  // Terrain properties
-  std::unordered_map<WorldKey, uint32_t> ground_height_count_world_;
-  std::unordered_map<WorldKey, double> ground_height_sum_world_;
-  std::unordered_map<WorldKey, double> obstacle_min_height_world_;
-  std::unordered_map<WorldKey, double> obstacle_max_height_world_;
+  std::unordered_map<WorldKey, CellData> cells_;
 
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr ground_sub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr nonground_sub_;
