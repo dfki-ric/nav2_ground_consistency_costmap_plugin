@@ -169,6 +169,11 @@ void GroundConsistencyLayer::updateBounds(
   double * min_x, double * min_y,
   double * max_x, double * max_y)
 {
+  // Start cycle timer
+  if (kpi_enabled_) {
+    kpi_tracker_->startTimer();
+  }
+
   double local_min_x = std::numeric_limits<double>::max();
   double local_min_y = std::numeric_limits<double>::max();
   double local_max_x = std::numeric_limits<double>::lowest();
@@ -480,10 +485,6 @@ void GroundConsistencyLayer::updateCosts(
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  if (kpi_enabled_) {
-    kpi_tracker_->startUpdateTimer();
-  }
-
   cells_updated_this_cycle_ = 0;
   cells_decayed_this_cycle_ = 0;
 
@@ -709,11 +710,9 @@ void GroundConsistencyLayer::updateCosts(
 
   // Record KPI metrics
   if (kpi_enabled_ && kpi_tracker_) {
-    double latency_ms = kpi_tracker_->stopUpdateTimer();
-    
     KPISnapshot snapshot;
     snapshot.timestamp = std::chrono::system_clock::now();
-    snapshot.update_latency_ms = latency_ms;
+    snapshot.total_cycle_latency_ms = kpi_tracker_->getTotalTime();
     snapshot.cells_updated = cells_updated_this_cycle_;
     snapshot.cells_decayed = cells_decayed_this_cycle_;
     snapshot.total_ground_cells = ground_score_world_.size();

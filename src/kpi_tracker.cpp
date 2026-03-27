@@ -31,7 +31,7 @@ void KPITracker::writeHeader()
     return;
   }
 
-  file_ << "timestamp,update_latency_ms,cells_updated,cells_decayed,"
+  file_ << "timestamp,total_cycle_ms,cells_updated,cells_decayed,"
         << "total_ground_cells,total_nonground_cells,memory_usage_mb,"
         << "ground_points,nonground_points\n";
   file_.flush();
@@ -53,7 +53,8 @@ void KPITracker::recordSnapshot(const KPISnapshot & snapshot)
 
   file_ << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S")
         << "." << std::setfill('0') << std::setw(3) << ms.count() << ","
-        << std::fixed << std::setprecision(3) << snapshot.update_latency_ms << ","
+        << std::fixed << std::setprecision(3) 
+        << snapshot.total_cycle_latency_ms << ","
         << snapshot.cells_updated << ","
         << snapshot.cells_decayed << ","
         << snapshot.total_ground_cells << ","
@@ -65,16 +66,16 @@ void KPITracker::recordSnapshot(const KPISnapshot & snapshot)
   file_.flush();
 }
 
-void KPITracker::startUpdateTimer()
+void KPITracker::startTimer()
 {
-  update_start_ = std::chrono::high_resolution_clock::now();
+  cycle_start_ = std::chrono::high_resolution_clock::now();
 }
 
-double KPITracker::stopUpdateTimer()
+double KPITracker::getTotalTime()
 {
-  auto end = std::chrono::high_resolution_clock::now();
+  auto cycle_end = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-    end - update_start_);
+    cycle_end - cycle_start_);
   return duration.count();
 }
 
