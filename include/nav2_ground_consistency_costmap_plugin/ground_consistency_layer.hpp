@@ -128,6 +128,8 @@ private:
   bool kpi_enabled_{false};
   uint32_t cells_updated_this_cycle_{0};
   uint32_t cells_decayed_this_cycle_{0};
+  uint32_t ground_points_this_cycle_{0};
+  uint32_t nonground_points_this_cycle_{0};
 };
 
 }  // namespace nav2_ground_consistency_costmap_plugin

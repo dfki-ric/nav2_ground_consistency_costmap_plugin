@@ -440,13 +440,18 @@ void GroundConsistencyLayer::nongroundCloudCallback(
 
 void GroundConsistencyLayer::integrateFrameCountsIntoScores()
 {
+  ground_points_this_cycle_ = 0;
+  nonground_points_this_cycle_ = 0;
+
   for (auto & [key, cell] : cells_) {
     if (cell.ground_count_frame > 0) {
+      ground_points_this_cycle_ += cell.ground_count_frame;
       cell.ground_score = static_cast<float>(
         std::min<double>(max_score_, cell.ground_score + cell.ground_count_frame * ground_inc_));
       cell.ground_count_frame = 0;
     }
     if (cell.nonground_count_frame > 0) {
+      nonground_points_this_cycle_ += cell.nonground_count_frame;
       cell.nonground_score = static_cast<float>(
         std::min<double>(max_score_, cell.nonground_score + cell.nonground_count_frame * nonground_inc_));
       cell.nonground_count_frame = 0;
@@ -462,14 +467,6 @@ void GroundConsistencyLayer::updateCosts(
 
   cells_updated_this_cycle_ = 0;
   cells_decayed_this_cycle_ = 0;
-
-  // Capture frame counts before integration clears them
-  uint32_t ground_points_this_cycle = 0;
-  uint32_t nonground_points_this_cycle = 0;
-  for (const auto & [key, cell] : cells_) {
-    ground_points_this_cycle += cell.ground_count_frame;
-    nonground_points_this_cycle += cell.nonground_count_frame;
-  }
 
   integrateFrameCountsIntoScores();
 
@@ -535,6 +532,9 @@ void GroundConsistencyLayer::updateCosts(
     return wx >= min_wx && wx <= max_wx && wy >= min_wy && wy <= max_wy;
   };
 
+  // Only decay when new observations arrived; no data = belief unchanged
+  bool have_new_data = (ground_points_this_cycle_ > 0 || nonground_points_this_cycle_ > 0);
+
   // Single pass: decay, compute costs, erase dead cells
   size_t total_ground_cells = 0;
   size_t total_nonground_cells = 0;
@@ -552,25 +552,26 @@ void GroundConsistencyLayer::updateCosts(
       continue;
     }
 
-    // Decay scores
-    if (cell.ground_score > 0.0f) {
-      cell.ground_score *= gd;
+    // Decay scores only when sensor is actively providing data
+    if (have_new_data) {
+      if (cell.ground_score > 0.0f) {
+        cell.ground_score *= gd;
+      }
+      if (cell.nonground_score > 0.0f) {
+        cell.nonground_score *= nd;
+      }
       cells_decayed_this_cycle_++;
-    }
-    if (cell.nonground_score > 0.0f) {
-      cell.nonground_score *= nd;
-      cells_decayed_this_cycle_++;
-    }
 
-    // Erase cells with no remaining evidence
-    if (cell.ground_score < 1e-3f && cell.nonground_score < 1e-3f) {
-      it = cells_.erase(it);
-      continue;
-    }
+      // Erase cells with no remaining evidence
+      if (cell.ground_score < 1e-3f && cell.nonground_score < 1e-3f) {
+        it = cells_.erase(it);
+        continue;
+      }
 
-    // Clamp tiny scores to zero
-    if (cell.ground_score < 1e-3f) cell.ground_score = 0.0f;
-    if (cell.nonground_score < 1e-3f) cell.nonground_score = 0.0f;
+      // Clamp tiny scores to zero
+      if (cell.ground_score < 1e-3f) cell.ground_score = 0.0f;
+      if (cell.nonground_score < 1e-3f) cell.nonground_score = 0.0f;
+    }
 
     // Count for KPI
     if (cell.ground_score > 0.0f) total_ground_cells++;
@@ -639,8 +640,8 @@ void GroundConsistencyLayer::updateCosts(
                        std::max(entries, size_t(16)) * 8;  // bucket array
     snapshot.memory_usage_mb = mem_bytes / (1024.0 * 1024.0);
     
-    snapshot.ground_points_processed = ground_points_this_cycle;
-    snapshot.nonground_points_processed = nonground_points_this_cycle;
+    snapshot.ground_points_processed = ground_points_this_cycle_;
+    snapshot.nonground_points_processed = nonground_points_this_cycle_;
     
     kpi_tracker_->recordSnapshot(snapshot);
   }
