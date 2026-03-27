@@ -27,13 +27,6 @@ static inline int32_t unpackY(GroundConsistencyLayer::WorldKey k)
   return static_cast<int32_t>(static_cast<uint32_t>(k & 0xFFFFFFFFu));
 }
 
-static inline tf2::Transform toTf2(const geometry_msgs::msg::TransformStamped & tf_stamped)
-{
-  tf2::Transform tf;
-  tf2::fromMsg(tf_stamped.transform, tf);
-  return tf;
-}
-
 GroundConsistencyLayer::GroundConsistencyLayer()
 {
   costmap_ = nullptr;
@@ -281,8 +274,8 @@ void GroundConsistencyLayer::groundCloudCallback(
     return;
   }
 
-  // Convert to tf2::Transform for efficient per-point application
-  tf2::Transform transform = toTf2(tf_stamped);
+  tf2::Transform transform;
+  tf2::fromMsg(tf_stamped.transform, transform);
   const double res = getResolution();
 
   try {
@@ -334,8 +327,8 @@ void GroundConsistencyLayer::nongroundCloudCallback(
     return;
   }
 
-  // Convert to tf2::Transform for efficient per-point application
-  tf2::Transform transform = toTf2(tf_stamped);
+  tf2::Transform transform;
+  tf2::fromMsg(tf_stamped.transform, transform);
   const double res = getResolution();
 
   try {
@@ -392,6 +385,8 @@ void GroundConsistencyLayer::updateCosts(
 
   integrateFrameCountsIntoScores();
 
+  const double res = getResolution();
+
   // Clear robot footprint evidence to prevent self-blocking
   if (footprint_clearing_enabled_ && !transformed_footprint_.empty()) {
     // Find bounds of footprint in world coordinates
@@ -407,7 +402,6 @@ void GroundConsistencyLayer::updateCosts(
       fp_max_y = std::max(fp_max_y, pt.y);
     }
 
-    const double res = getResolution();
     const int32_t min_xi = static_cast<int32_t>(std::floor(fp_min_x / res));
     const int32_t min_yi = static_cast<int32_t>(std::floor(fp_min_y / res));
     const int32_t max_xi = static_cast<int32_t>(std::floor(fp_max_x / res));
@@ -424,7 +418,6 @@ void GroundConsistencyLayer::updateCosts(
     setConvexPolygonCost(transformed_footprint_, nav2_costmap_2d::FREE_SPACE);
   }
 
-  const double res = getResolution();
   const float gd = static_cast<float>(ground_decay_);
   const float nd = static_cast<float>(nonground_decay_);
 
@@ -476,13 +469,16 @@ void GroundConsistencyLayer::updateCosts(
 
     // Decay scores only when sensor is actively providing data
     if (have_new_data) {
+      bool decayed = false;
       if (cell.ground_score > 0.0f) {
         cell.ground_score *= gd;
+        decayed = true;
       }
       if (cell.nonground_score > 0.0f) {
         cell.nonground_score *= nd;
+        decayed = true;
       }
-      cells_decayed_this_cycle_++;
+      if (decayed) cells_decayed_this_cycle_++;
 
       // Erase cells with no remaining evidence
       if (cell.ground_score < 1e-3f && cell.nonground_score < 1e-3f) {
