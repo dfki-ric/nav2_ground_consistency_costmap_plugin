@@ -9,7 +9,6 @@ find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
-find_package(tf2_sensor_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
 
 if(BUILD_TESTING)
@@ -37,7 +36,6 @@ ament_target_dependencies(${PROJECT_NAME}
   tf2
   tf2_ros
   tf2_geometry_msgs
-  tf2_sensor_msgs
   pluginlib
 )
 
