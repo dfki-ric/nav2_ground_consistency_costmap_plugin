@@ -1,127 +1,96 @@
 # nav2_ground_consistency_costmap_plugin
+
 ![ground_consistency_layer](images/ground_consistency_layer.gif)
 
 ## Overview
 
-`nav2_ground_consistency_costmap_plugin` is a custom Nav2 costmap layer that fuses
-**ground** and **non-ground** point cloud evidence to produce a probabilistic
-occupancy estimate in the costmap with temporal decay and height-aware filtering.
+A Nav2 costmap layer that fuses ground and non-ground point cloud evidence into a probabilistic occupancy estimate with temporal decay and height-aware filtering.
 
-It integrates ground segmentation output directly into Nav2's costmap stack and provides:
+It consumes the output of a ground segmentation node (two PointCloud2 topics) and integrates it directly into Nav2's costmap stack. The layer accumulates per-cell evidence scores, decays them over time, and uses ground height statistics to classify obstacles as blocking, passable (small), or overhead (tunnels).
 
-- **Evidence-based occupancy scoring**: Accumulates evidence from ground and obstacle points
-- **Temporal decay**: Scores decay over time to handle out-of-date observations
-- **Height-aware obstacle filtering**: Distinguishes between tunnels, small obstacles, and true blocking obstacles
-- **Per-cell terrain statistics**: Tracks ground height and obstacle dimensions for intelligent classification
-- **Rolling window support**: Efficiently manages costmap updates with automatic memory management
-- **Thread-safe integration**: Asynchronous point cloud callbacks with mutex protection
-
-## Topics
-
-The plugin subscribes to two point cloud topics:
+## Subscribed Topics
 
 | Topic | Type | Description |
-|-------|------|------------|
-| `/ground_points` | `sensor_msgs/msg/PointCloud2` | Ground-classified points (e.g., from segmentation node) |
+|-------|------|-------------|
+| `/ground_points` | `sensor_msgs/msg/PointCloud2` | Ground-classified points from a segmentation node |
 | `/nonground_points` | `sensor_msgs/msg/PointCloud2` | Non-ground/obstacle-classified points |
 
-Both clouds are automatically transformed into the costmap's global frame using TF2.
+Both clouds are transformed into the costmap's global frame via TF2.
 
 ## Parameters
 
-Configuration parameters control the evidence accumulation, decay rates, and classification thresholds:
-
-| Parameter | Default | Type | Description |
-|-----------|---------|------|------------|
-| `ground_points_topic` | `/ground_points` | string | Topic name for ground point cloud |
-| `nonground_points_topic` | `/nonground_points` | string | Topic name for obstacle point cloud |
-| `ground_inc` | `1.0` | double | Evidence increment per ground point per update |
-| `nonground_inc` | `1.5` | double | Evidence increment per obstacle point per update |
-| `ground_decay` | `0.92` | double | Multiplicative decay factor for ground evidence per costmap update (0.0–1.0) |
-| `nonground_decay` | `0.90` | double | Multiplicative decay factor for obstacle evidence per costmap update (0.0–1.0) |
-| `nonground_occ_thresh` | `2.0` | double | Minimum obstacle score required to trigger height-based classification |
-| `nonground_prob_thresh` | `0.750` | double | Minimum obstacle probability (0.0–1.0) required for lethal/free classification |
-| `max_score` | `1000.0` | double | Upper clamp limit for score accumulation |
-| `min_clearance` | `0.1` | double | Maximum obstacle height [m] considered "small" (passable under) |
-| `robot_height` | `1.2` | double | Robot height [m] used for tunnel detection (obstacles above this are tunnels) |
-| `tf_timeout` | `0.1` | double | TF lookup timeout [seconds] for cloud transformation |
-| `footprint_clearing_enabled` | `true` | bool | Enable clearing of robot footprint polygon to prevent self-blocking |
-| `enable_kpi_logging` | `false` | bool | Enable KPI tracking and CSV logging to `/tmp/costmap_kpi_*.csv` |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `ground_points_topic` | `/ground_points` | Topic for ground point cloud |
+| `nonground_points_topic` | `/nonground_points` | Topic for obstacle point cloud |
+| `ground_inc` | `1.0` | Evidence added per ground point |
+| `nonground_inc` | `1.5` | Evidence added per obstacle point |
+| `ground_decay` | `0.92` | Per-cycle multiplicative decay for ground evidence (0.0-1.0) |
+| `nonground_decay` | `0.90` | Per-cycle multiplicative decay for obstacle evidence (0.0-1.0) |
+| `nonground_occ_thresh` | `2.0` | Minimum obstacle score to trigger height classification |
+| `nonground_prob_thresh` | `0.750` | Minimum obstacle probability for lethal/free classification |
+| `max_score` | `1000.0` | Upper clamp for score accumulation |
+| `min_clearance` | `0.1` | Max obstacle height (m) considered passable |
+| `robot_height` | `1.2` | Robot height (m) for tunnel detection |
+| `tf_timeout` | `0.1` | TF lookup timeout (seconds) |
+| `footprint_clearing_enabled` | `true` | Clear evidence under the robot footprint polygon |
+| `enable_kpi_logging` | `false` | Write per-cycle metrics to `/tmp/costmap_kpi_*.csv` |
 
 ## Occupancy Model
 
-Each grid cell maintains:
-- **Ground evidence score**: Accumulated and decayed from ground points
-- **Obstacle evidence score**: Accumulated and decayed from non-ground points
-- **Ground height statistics**: Sum and count for computing average height
-- **Obstacle height bounds**: Minimum and maximum z-coordinate of obstacles
+Each grid cell stores a single `CellData` struct containing ground and obstacle evidence scores, ground height statistics (sum and count), and obstacle height bounds (min and max z).
 
-The occupancy probability is computed as:
+The occupancy probability is:
 
 ```
 p_occ = nonground_score / (ground_score + nonground_score + epsilon)
 ```
 
-### Cost Mapping
+This is mapped linearly to the costmap cost range (0-252).
 
-The probability `p_occ` is linearly mapped to the costmap cost value (0–252):
+### Height-Based Classification
+
+When obstacle evidence exceeds both thresholds (`nonground_score >= nonground_occ_thresh` and `p_occ >= nonground_prob_thresh`), the layer computes:
+
 ```
-cost = p_occ × 252.0  (clamped to 0–252)
-```
-
-### Intelligent Classification
-
-When obstacle evidence exceeds **both** thresholds (`nonground_score >= nonground_occ_thresh` AND `p_occ >= nonground_prob_thresh`):
-
-Height-based filtering occurs using per-cell terrain statistics:
-
-| Condition | Result | Reason |
-|-----------|--------|--------|
-| `step_height > robot_height` | 🟢 **FREE_SPACE** | Tunnel (can pass underneath) |
-| `obstacle_height < min_clearance` | 🟢 **FREE_SPACE** | Small obstacle (curbs, low vegetation) |
-| Otherwise | 🚧 **LETHAL_OBSTACLE** | Confirmed blocking obstacle |
-
-Where:
-```
-step_height = obstacle_min_height - ground_avg_height
-obstacle_height = obstacle_max_height - ground_avg_height
+step_height     = obstacle_min_z - avg_ground_z
+obstacle_height = obstacle_max_z - avg_ground_z
 ```
 
-## Data Structure & Memory Management
+| Condition | Cost | Reason |
+|-----------|------|--------|
+| `step_height > robot_height` | FREE_SPACE | Overhead structure, robot fits underneath |
+| `obstacle_height < min_clearance` | FREE_SPACE | Small obstacle (curbs, low vegetation) |
+| Otherwise | LETHAL_OBSTACLE | Blocking obstacle |
 
-The plugin uses efficient world-frame keying:
+### No-Data Decay Guard
 
-- **WorldKey**: 64-bit packed representation of world-frame grid coordinates
-  - Enables stable, unique identification of cells across costmap rolling windows
-  - Automatically sampled to costmap resolution
+When no sensor data arrives (e.g., bag pause, sensor dropout), decay is skipped entirely. The costmap retains its last known state rather than silently erasing all evidence.
 
-- **Per-cell maps** (unordered_map with WorldKey):
-  - Ground scores, nonground scores
-  - Ground height sums/counts, obstacle min/max heights
+## Data Structure
 
-- **Rolling window cleanup**:
-  - Cells outside the active window are removed
-  - Scores below noise threshold (1e-3) are erased with associated data
-  - Prevents unbounded memory growth
+All per-cell data is stored in a single `std::unordered_map<WorldKey, CellData>`. The WorldKey is a 64-bit packed pair of signed 32-bit grid coordinates in the global frame. This means cells are stable across costmap rolling window shifts without requiring any data migration.
 
-## Thread Safety
+The hash map is pre-allocated in `matchSize()` to the costmap cell count to avoid rehashing during operation.
 
-- **Asynchronous callbacks**: Ground and nonground cloud callbacks run in ROS 2's message thread
-- **Mutex protection**: All shared data structures protected by `std::lock_guard<std::mutex>`
-- **Callback ordering**: Frame counts accumulated during callbacks, integrated into scores during `updateCosts()`
+Cells outside the active costmap window are erased each cycle. Cells whose scores decay below a noise threshold (1e-3) are also removed, preventing unbounded memory growth.
 
-## Build & Installation
+## Processing Pipeline
 
-### Build the package:
+Point cloud callbacks run asynchronously and perform a single pass per cloud: each point is transformed inline using `tf2::Transform`, quantized to a WorldKey, and accumulated into the cell's frame counters. There is no intermediate cloud copy or multi-pass iteration.
+
+During `updateCosts()`, the frame counters are integrated into persistent scores, decay is applied (if new data arrived), footprint evidence is cleared using a point-in-polygon test, and costs are written to the master grid, all in a single pass over the cell map.
+
+All shared state is protected by a mutex.
+
+## Build
 
 ```bash
-colcon build --packages-select nav2_ground_consistency_costmap_plugin --cmake-args -DCMAKE_BUILD_TYPE=RELEASE
+colcon build --packages-select nav2_ground_consistency_costmap_plugin
 source install/setup.bash
 ```
 
-## Nav2 Configuration Example
-
-Add the layer to your Nav2 costmap configuration:
+## Configuration Example
 
 ```yaml
 local_costmap:
@@ -138,134 +107,63 @@ local_costmap:
       nonground_occ_thresh: 2.0
       nonground_prob_thresh: 0.750
       max_score: 1000.0
-      min_clearance: 0.1              # 10 cm: small obstacles max height
-      robot_height: 1.2               # 1.2 m: tunnel detection threshold
+      min_clearance: 0.1
+      robot_height: 1.2
       tf_timeout: 0.1
-      footprint_clearing_enabled: true # Clear robot footprint polygon
+      footprint_clearing_enabled: true
       enable_kpi_logging: false
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
-      # ... standard inflation layer config ...
 ```
 
-**Note**: This layer can run standalone with its own footprint clearing, or alongside `obstacle_layer`
-for complementary raw sensor data feedback. The footprint clearing prevents the robot from
-self-blocking when traversing difficult terrain detected by ground segmentation.
+This layer serves as an alternative to `obstacle_layer` for systems with ground segmentation. It is typically used alongside `inflation_layer`.
 
 ## Dependencies
 
-- **ROS 2**: Humble or newer (tested with Humble, Jazzy)
-- **Nav2**: `nav2_costmap_2d` 1.1.0+
-- **pluginlib**: For plugin loading
-- **tf2 / tf2_ros**: Transform tree lookup
-- **sensor_msgs**: PointCloud2 message type
-- **geometry_msgs**: For transformation operations
+- ROS 2 Jazzy or newer (not tested on Humble yet)
+- nav2_costmap_2d
+- pluginlib
+- tf2 / tf2_ros
+- sensor_msgs
+- geometry_msgs
 
 ## Tuning Guide
 
-### Increasing traversable area (fewer obstacles):
-- Decrease `robot_height` → more areas classified as tunnels
-- Decrease `nonground_occ_thresh` or `nonground_prob_thresh` → lower obstacle evidence required
-- Increase `min_clearance` → more obstacles classified as "small"
-- Increase decay factors (`ground_decay`, `nonground_decay`) → evidence persists longer
+To increase traversable area (fewer obstacles):
+- Decrease `robot_height` (more areas classified as tunnels)
+- Increase `min_clearance` (more small obstacles ignored)
+- Lower `nonground_occ_thresh` or `nonground_prob_thresh`
+- Increase decay factors (evidence persists longer)
 
-### Increasing obstacle avoidance (more conservative):
-- Increase `robot_height` → fewer tunnels
-- Increase `nonground_occ_thresh` or `nonground_prob_thresh` → higher evidence required
-- Decrease `min_clearance` → fewer small obstacles ignored
-- Decrease decay factors → evidence decays faster
+To increase obstacle avoidance (more conservative):
+- Increase `robot_height` (fewer tunnels)
+- Decrease `min_clearance` (fewer small obstacles ignored)
+- Raise `nonground_occ_thresh` or `nonground_prob_thresh`
+- Decrease decay factors (evidence fades faster)
 
-### Performance:
-- If lagging, check point cloud frequency and density
-- Adjust `max_score` to prevent score explosion
-- Monitor memory with `ros2 node info /costmap_node`
+## Design Decisions
 
-## Design Rationale
+### Why Passive Decay Instead of Raytracing
 
-### Clearing Strategy: Passive Decay vs. Active Raytracing
+The layer uses temporal decay to clear stale evidence rather than active raytracing. Ground points already represent confirmed ground, which implies obstacle-free space. Height statistics persist independently of score decay, so classification remains informed even as scores fade. This is computationally cheaper than raytracing (O(n) accumulation + O(k) decay vs O(n*m) raycasting) and naturally handles dynamic environments through tunable decay rates.
 
-This plugin uses **passive temporal decay** for clearing, not active raytracing.
+### Why PointCloud2 Only
 
-**Why passive decay is appropriate for this plugin:**
+Ground segmentation algorithms produce PointCloud2 output. LaserScan support would add complexity (LaserProjector dependency, separate callback paths, message dispatch) for no practical benefit. Users with LaserScan data should convert upstream.
 
-1. **Pre-segmented input assumption**: Ground points represent confirmed ground, implying
-   obstacle-free space underneath. This is stronger than raw sensor data where raytracing
-   is necessary to confirm free space.
+### Footprint Clearing
 
-2. **Height-aware classification**: Unlike obstacle_layer, we use ground height statistics
-   to distinguish passable obstacles (tunnels, curbs). A decayed obstacle score doesn't
-   make terrain unpredictable; height statistics remain to inform classification.
+Each update cycle, the layer clears evidence under the robot's footprint polygon to prevent self-blocking. A point-in-polygon test ensures only cells actually under the footprint are cleared, not the entire bounding box. The footprint is obtained from Nav2's costmap configuration. Set `footprint_clearing_enabled: false` to disable.
 
-3. **Computational efficiency**: Raytracing all point clouds would be O(n * m) per cycle
-   where n=points, m=costmap cells. Our O(n) evidence accumulation + O(k) decay is more
-   efficient for dense point clouds.
+## KPI Logging
 
-4. **Dynamic environment handling**: Decay naturally "forgets" stale obstacles:
-   - `ground_decay=0.92`: Ground evidence decays slower (environment stable)
-   - `nonground_decay=0.90`: Obstacle evidence decays faster (cautious)
-   Users can tune decay rates for their environment dynamics.
+When `enable_kpi_logging` is set to `true`, the layer writes per-cycle metrics to `/tmp/costmap_kpi_<layer_name>.csv`. A plotting script is included:
 
-### Input Format: PointCloud2-Only (By Design)
-
-This plugin **only accepts PointCloud2**, not LaserScan.
-
-**Why PointCloud2, not LaserScan:**
-
-1. **Alignment with Segmentation Pipeline**: Ground segmentation algorithms (KITTI, MLS-based)
-   produce PointCloud2 output with semantic labels. LaserScan is unstructured range data
-   requiring angle-based reconstruction. Supporting it adds no value and increases complexity.
-
-2. **Upstream Conversion is Simpler**: Converting LaserScan→PointCloud2 is a well-solved
-   problem. This follows Unix philosophy: do one thing well. The conversion responsibility
-   belongs in the segmentation pipeline, not in this layer.
-
-3. **No Performance Loss**: Point clouds from LaserScan conversion are just as efficient as
-   native point clouds. The layer processes all PointCloud2 data uniformly.
-
-4. **Reduces Plugin Complexity**: Adding LaserScan support requires:
-   - LaserProjector dependency
-   - Message type dispatch logic
-   - Separate callback paths
-   - Additional test cases
-
-   For minimal benefit (a conversion that should happen upstream anyway).
-
-**For users with LaserScans:**
-
-Use standard ROS tooling to convert LaserScan to PointCloud2:
 ```bash
-ros2 run laser_geometry laserscan_to_pointcloud_node \
-  --ros-args -r scan_in:=/scan -r cloud_out:=/ground_points
+python3 scripts/plot_costmap_kpi.py
 ```
 
-Or integrate a conversion node into your launch pipeline.
-
-**Design Philosophy**: This layer is a consumer of segmentation output, not a sensor driver.
-
-### Footprint Clearing: Preventing Robot Self-Blocking
-
-This plugin includes **active robot footprint clearing** to ensure the robot never self-blocks.
-
-**How it works:**
-
-1. **Every costmap update**, the layer retrieves the robot's footprint polygon
-2. **Transforms** it to the current robot pose (robot_x, robot_y, robot_yaw)
-3. **Marks all cells within the footprint** as FREE_SPACE to prevent obstacles from being placed under the robot
-4. This runs **before** occupancy evidence is applied, ensuring footprint cells are always clear
-
-**Footprint Configuration:**
-
-- If a footprint is configured in your costmap (via Nav2 parameter `footprint`), it will be used
-- If no footprint is configured then the clearance operation will be skipped.
-- To customize, add this to your costmap config:
-  ```yaml
-  costmap:
-    footprint: "[[0.5, 0.5], [0.5, -0.5], [-0.5, -0.5], [-0.5, 0.5]]"  # meters
-  ```
-
-**Parameter Control:**
-
-Set `footprint_clearing_enabled: false` in the layer config to disable this feature (not recommended for safety).
+This produces charts for cycle latency, cells updated/decayed, map sizes, memory usage, and points processed per update.
 
 ## License
 
@@ -276,4 +174,5 @@ See LICENSE file.
 Contributions and bug reports are welcome.
 
 ## Funding
-This package was initiated and is currently developed at the Robotics Innovation Center of the German Research Center for Artificial Intelligence (DFKI) in Bremen. The development was started in the scope of the Robdekon2 (50RA1406), which has been funded from the German Federal Ministry for Research, Technology, and Space.
+
+This package was initiated and is currently developed at the Robotics Innovation Center of the German Research Center for Artificial Intelligence (DFKI) in Bremen. The development was started in the scope of Robdekon2 (50RA1406), funded by the German Federal Ministry for Research, Technology, and Space.
