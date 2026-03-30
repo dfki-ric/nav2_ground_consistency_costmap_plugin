@@ -523,11 +523,6 @@ void GroundConsistencyLayer::updateCosts(
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  // Clear footprint on the master grid
-  if (footprint_clearing_enabled_ && !transformed_footprint_.empty()) {
-    master_grid.setConvexPolygonCost(transformed_footprint_, nav2_costmap_2d::FREE_SPACE);
-  }
-
   unsigned char * master_array = master_grid.getCharMap();
   unsigned int size_x = master_grid.getSizeInCellsX();
   const double res = getResolution();
@@ -546,6 +541,11 @@ void GroundConsistencyLayer::updateCosts(
 
     master_array[my * size_x + mx] = cell.computed_cost;
     cells_updated_this_cycle_++;
+  }
+
+  // Clear footprint on the master grid (after writing costs so it takes priority)
+  if (footprint_clearing_enabled_ && !transformed_footprint_.empty()) {
+    master_grid.setConvexPolygonCost(transformed_footprint_, nav2_costmap_2d::FREE_SPACE);
   }
 
   // Record KPI metrics
