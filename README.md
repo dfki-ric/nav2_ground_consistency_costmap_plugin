@@ -34,6 +34,7 @@ Both clouds are transformed into the costmap's global frame via TF2.
 | `robot_height` | `1.2` | Robot height (m) for tunnel detection |
 | `tf_timeout` | `0.1` | TF lookup timeout (seconds) |
 | `footprint_clearing_enabled` | `true` | Clear evidence under the robot footprint polygon |
+| `max_data_range` | `0.0` | Max distance (m) from robot to retain cell data. `0` = disabled (use costmap window only) |
 | `enable_kpi_logging` | `false` | Write per-cycle metrics to `/tmp/costmap_kpi_*.csv` |
 
 ## Occupancy Model
@@ -79,7 +80,7 @@ Cells outside the active costmap window are erased each cycle. Cells whose score
 
 Point cloud callbacks run asynchronously and perform a single pass per cloud: each point is transformed inline using `tf2::Transform`, quantized to a WorldKey, and accumulated into the cell's frame counters. There is no intermediate cloud copy or multi-pass iteration.
 
-During `updateCosts()`, the frame counters are integrated into persistent scores, decay is applied (if new data arrived), footprint evidence is cleared using a point-in-polygon test, and costs are written to the master grid, all in a single pass over the cell map.
+During `updateBounds()`, all heavy computation happens in a single pass over the cell map: frame counters are integrated into persistent scores, cells beyond `max_data_range` or outside the costmap window are culled, decay is applied (if new data arrived), costs are computed and stored, and bounds are updated. During `updateCosts()`, footprint evidence is cleared using a point-in-polygon test, and pre-computed costs are written to the master grid via raw pointer access.
 
 All shared state is protected by a mutex.
 
@@ -111,6 +112,7 @@ local_costmap:
       robot_height: 1.2
       tf_timeout: 0.1
       footprint_clearing_enabled: true
+      max_data_range: 0.0
       enable_kpi_logging: false
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
