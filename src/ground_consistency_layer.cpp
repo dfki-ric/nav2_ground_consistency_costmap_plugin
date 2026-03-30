@@ -229,6 +229,13 @@ void GroundConsistencyLayer::updateBounds(
   const bool have_new_data = have_new_data_;
   have_new_data_ = false;
 
+  // Rolling window bounds for culling cells outside the costmap
+  const nav2_costmap_2d::Costmap2D * master = layered_costmap_->getCostmap();
+  double win_origin_x = master->getOriginX();
+  double win_origin_y = master->getOriginY();
+  double win_max_x = win_origin_x + master->getSizeInMetersX();
+  double win_max_y = win_origin_y + master->getSizeInMetersY();
+
   double local_min_x = std::numeric_limits<double>::max();
   double local_min_y = std::numeric_limits<double>::max();
   double local_max_x = std::numeric_limits<double>::lowest();
@@ -252,6 +259,12 @@ void GroundConsistencyLayer::updateBounds(
         it = cells_.erase(it);
         continue;
       }
+    }
+
+    // Cull cells outside the rolling costmap window
+    if (wx < win_origin_x || wx > win_max_x || wy < win_origin_y || wy > win_max_y) {
+      it = cells_.erase(it);
+      continue;
     }
 
     // Integrate frame counts into scores
@@ -512,7 +525,7 @@ void GroundConsistencyLayer::updateCosts(
 
   // Clear footprint on the master grid
   if (footprint_clearing_enabled_ && !transformed_footprint_.empty()) {
-    setConvexPolygonCost(transformed_footprint_, nav2_costmap_2d::FREE_SPACE);
+    master_grid.setConvexPolygonCost(transformed_footprint_, nav2_costmap_2d::FREE_SPACE);
   }
 
   unsigned char * master_array = master_grid.getCharMap();
