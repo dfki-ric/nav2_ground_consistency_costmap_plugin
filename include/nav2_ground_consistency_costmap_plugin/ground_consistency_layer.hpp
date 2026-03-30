@@ -70,8 +70,6 @@ private:
   void groundCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
   void nongroundCloudCallback(const sensor_msgs::msg::PointCloud2::ConstSharedPtr msg);
 
-  void integrateFrameCountsIntoScores();
-
   void updateFootprint(
     double robot_x, double robot_y, double robot_yaw,
     double * min_x, double * min_y, double * max_x, double * max_y);
@@ -95,6 +93,7 @@ private:
 
   double min_clearance_{0.1};    // 10 cm: small obstacles max height
   double robot_height_{1.2};     // 1.2 m: tunnel detection threshold
+  double max_data_range_{0.0};   // max distance from robot to retain data (0 = disabled)
 
   // Footprint clearing
   bool footprint_clearing_enabled_{true};
@@ -114,6 +113,7 @@ private:
     double obstacle_max_height{std::numeric_limits<double>::lowest()};
     uint32_t ground_count_frame{0};
     uint32_t nonground_count_frame{0};
+    uint8_t computed_cost{0};
   };
 
   std::unordered_map<WorldKey, CellData> cells_;
@@ -122,6 +122,7 @@ private:
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr nonground_sub_;
 
   std::mutex mutex_;
+  bool have_new_data_{false};
 
   // KPI Tracking
   std::unique_ptr<KPITracker> kpi_tracker_;
@@ -130,6 +131,8 @@ private:
   uint32_t cells_decayed_this_cycle_{0};
   uint32_t ground_points_this_cycle_{0};
   uint32_t nonground_points_this_cycle_{0};
+  size_t total_ground_cells_{0};
+  size_t total_nonground_cells_{0};
 };
 
 }  // namespace nav2_ground_consistency_costmap_plugin

@@ -50,10 +50,11 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("nonground_occ_thresh", rclcpp::ParameterValue(2.0));
   declareParameter("nonground_prob_thresh", rclcpp::ParameterValue(0.750));
   declareParameter("max_score", rclcpp::ParameterValue(1000.0));
-  declareParameter("min_clearance", rclcpp::ParameterValue(0.1)); // 10 cm: small obstacles max height
-  declareParameter("robot_height", rclcpp::ParameterValue(1.2)); // 1.2 m: tunnel detection threshold
-  declareParameter("footprint_clearing_enabled", rclcpp::ParameterValue(true)); // Clear robot footprint polygon
+  declareParameter("min_clearance", rclcpp::ParameterValue(0.1));
+  declareParameter("robot_height", rclcpp::ParameterValue(1.2));
+  declareParameter("footprint_clearing_enabled", rclcpp::ParameterValue(true));
   declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
+  declareParameter("max_data_range", rclcpp::ParameterValue(0.0));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -69,6 +70,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".robot_height", robot_height_);
   node->get_parameter(name_ + ".footprint_clearing_enabled", footprint_clearing_enabled_);
   node->get_parameter(name_ + ".enable_kpi_logging", kpi_enabled_);
+  node->get_parameter(name_ + ".max_data_range", max_data_range_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
@@ -160,42 +162,190 @@ void GroundConsistencyLayer::updateBounds(
     kpi_tracker_->startTimer();
   }
 
+  std::lock_guard<std::mutex> lock(mutex_);
+
+  cells_updated_this_cycle_ = 0;
+  cells_decayed_this_cycle_ = 0;
+  ground_points_this_cycle_ = 0;
+  nonground_points_this_cycle_ = 0;
+
+  // Clear footprint evidence
+  if (footprint_clearing_enabled_) {
+    updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
+
+    if (!transformed_footprint_.empty()) {
+      const double fp_res = getResolution();
+      // Compute footprint bounding box in cell coordinates
+      double fp_min_x = std::numeric_limits<double>::max();
+      double fp_min_y = std::numeric_limits<double>::max();
+      double fp_max_x = std::numeric_limits<double>::lowest();
+      double fp_max_y = std::numeric_limits<double>::lowest();
+      for (const auto & pt : transformed_footprint_) {
+        fp_min_x = std::min(fp_min_x, pt.x);
+        fp_min_y = std::min(fp_min_y, pt.y);
+        fp_max_x = std::max(fp_max_x, pt.x);
+        fp_max_y = std::max(fp_max_y, pt.y);
+      }
+      const int32_t min_xi = static_cast<int32_t>(std::floor(fp_min_x / fp_res));
+      const int32_t min_yi = static_cast<int32_t>(std::floor(fp_min_y / fp_res));
+      const int32_t max_xi = static_cast<int32_t>(std::floor(fp_max_x / fp_res));
+      const int32_t max_yi = static_cast<int32_t>(std::floor(fp_max_y / fp_res));
+      const size_t n = transformed_footprint_.size();
+
+      for (int32_t xi = min_xi; xi <= max_xi; ++xi) {
+        for (int32_t yi = min_yi; yi <= max_yi; ++yi) {
+          double px = (static_cast<double>(xi) + 0.5) * fp_res;
+          double py = (static_cast<double>(yi) + 0.5) * fp_res;
+
+          // Point-in-polygon test (ray casting)
+          bool inside = false;
+          for (size_t i = 0, j = n - 1; i < n; j = i++) {
+            const auto & a = transformed_footprint_[i];
+            const auto & b = transformed_footprint_[j];
+            if ((a.y > py) != (b.y > py) &&
+                px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x) {
+              inside = !inside;
+            }
+          }
+          if (inside) {
+            cells_.erase(packXY(xi, yi));
+          }
+        }
+      }
+    }
+  } else {
+    updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
+  }
+
+  // Single pass: integrate frame counts, decay, compute costs, cull, compute bounds
+  const float gd = static_cast<float>(ground_decay_);
+  const float nd = static_cast<float>(nonground_decay_);
+  const float oth = static_cast<float>(nonground_occ_thresh_);
+  const float pth = static_cast<float>(nonground_prob_thresh_);
+  const float eps = 1e-5f;
+  const double max_range_sq = max_data_range_ * max_data_range_;
+  const bool use_range_limit = max_data_range_ > 0.0;
+  const double res = getResolution();
+  const bool have_new_data = have_new_data_;
+  have_new_data_ = false;
+
   double local_min_x = std::numeric_limits<double>::max();
   double local_min_y = std::numeric_limits<double>::max();
   double local_max_x = std::numeric_limits<double>::lowest();
   double local_max_y = std::numeric_limits<double>::lowest();
 
-  {
-    std::lock_guard<std::mutex> lock(mutex_);
+  size_t total_ground_cells = 0;
+  size_t total_nonground_cells = 0;
 
-    for (const auto & [key, cell] : cells_) {
-      if (cell.ground_score <= 0.0f && cell.nonground_score <= 0.0f) continue;
+  for (auto it = cells_.begin(); it != cells_.end(); ) {
+    auto & cell = it->second;
+    int32_t xi = unpackX(it->first);
+    int32_t yi = unpackY(it->first);
+    double wx = (static_cast<double>(xi) + 0.5) * res;
+    double wy = (static_cast<double>(yi) + 0.5) * res;
 
-      int32_t xi = unpackX(key);
-      int32_t yi = unpackY(key);
-      double wx = (xi + 0.5) * getResolution();
-      double wy = (yi + 0.5) * getResolution();
-
-      local_min_x = std::min(local_min_x, wx);
-      local_max_x = std::max(local_max_x, wx);
-      local_min_y = std::min(local_min_y, wy);
-      local_max_y = std::max(local_max_y, wy);
+    // Cull cells beyond max_data_range from robot
+    if (use_range_limit) {
+      double dx = wx - robot_x;
+      double dy = wy - robot_y;
+      if (dx * dx + dy * dy > max_range_sq) {
+        it = cells_.erase(it);
+        continue;
+      }
     }
+
+    // Integrate frame counts into scores
+    if (cell.ground_count_frame > 0) {
+      ground_points_this_cycle_ += cell.ground_count_frame;
+      cell.ground_score = static_cast<float>(
+        std::min<double>(max_score_, cell.ground_score + cell.ground_count_frame * ground_inc_));
+      cell.ground_count_frame = 0;
+    }
+    if (cell.nonground_count_frame > 0) {
+      nonground_points_this_cycle_ += cell.nonground_count_frame;
+      cell.nonground_score = static_cast<float>(
+        std::min<double>(max_score_, cell.nonground_score + cell.nonground_count_frame * nonground_inc_));
+      cell.nonground_count_frame = 0;
+    }
+
+    // Decay scores only when sensor is actively providing data
+    if (have_new_data) {
+      bool decayed = false;
+      if (cell.ground_score > 0.0f) {
+        cell.ground_score *= gd;
+        decayed = true;
+      }
+      if (cell.nonground_score > 0.0f) {
+        cell.nonground_score *= nd;
+        decayed = true;
+      }
+      if (decayed) cells_decayed_this_cycle_++;
+
+      if (cell.ground_score < 1e-3f && cell.nonground_score < 1e-3f) {
+        it = cells_.erase(it);
+        continue;
+      }
+
+      if (cell.ground_score < 1e-3f) cell.ground_score = 0.0f;
+      if (cell.nonground_score < 1e-3f) cell.nonground_score = 0.0f;
+    }
+
+    // Count for KPI
+    if (cell.ground_score > 0.0f) total_ground_cells++;
+    if (cell.nonground_score > 0.0f) total_nonground_cells++;
+
+    // Compute cost and store in cell
+    float g = cell.ground_score;
+    float ng = cell.nonground_score;
+    const float denom = ng + g + eps;
+    const float p_occ = ng / denom;
+    uint8_t cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
+
+    bool make_lethal = false;
+    bool make_free = false;
+    if (ng >= oth && p_occ > pth) {
+      double ground_avg = 0.0;
+      if (cell.ground_height_count > 0u) {
+        ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
+      }
+
+      double step_height = cell.obstacle_min_height - ground_avg;
+      double obstacle_height = cell.obstacle_max_height - ground_avg;
+
+      if (step_height > robot_height_ || obstacle_height < min_clearance_) {
+        make_free = true;
+      } else {
+        make_lethal = true;
+      }
+    }
+
+    if (make_lethal) {
+      cost = nav2_costmap_2d::LETHAL_OBSTACLE;
+    } else if (make_free) {
+      cost = nav2_costmap_2d::FREE_SPACE;
+    }
+
+    cell.computed_cost = cost;
+
+    // Update bounds
+    local_min_x = std::min(local_min_x, wx);
+    local_max_x = std::max(local_max_x, wx);
+    local_min_y = std::min(local_min_y, wy);
+    local_max_y = std::max(local_max_y, wy);
+
+    ++it;
   }
 
-  // If no data, just update footprint (don't update costmap data)
-  if (local_min_x > local_max_x) {
-    updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
-    return;
+  // Store KPI counters for use in updateCosts
+  total_ground_cells_ = total_ground_cells;
+  total_nonground_cells_ = total_nonground_cells;
+
+  if (local_min_x <= local_max_x) {
+    *min_x = std::min(*min_x, local_min_x);
+    *min_y = std::min(*min_y, local_min_y);
+    *max_x = std::max(*max_x, local_max_x);
+    *max_y = std::max(*max_y, local_max_y);
   }
-
-  *min_x = local_min_x;
-  *min_y = local_min_y;
-  *max_x = local_max_x;
-  *max_y = local_max_y;
-
-  // Transform robot footprint for clearing
-  updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
 }
 
 void GroundConsistencyLayer::updateFootprint(
@@ -221,10 +371,8 @@ void GroundConsistencyLayer::updateFootprint(
     return;
   }
 
-  // Transform robot footprint to current pose
   nav2_costmap_2d::transformFootprint(robot_x, robot_y, robot_yaw, footprint, transformed_footprint_);
 
-  // Update bounds to include footprint
   for (unsigned int i = 0; i < transformed_footprint_.size(); ++i) {
     touch(transformed_footprint_[i].x, transformed_footprint_[i].y, min_x, min_y, max_x, max_y);
   }
@@ -295,6 +443,7 @@ void GroundConsistencyLayer::groundCloudCallback(
       cell.ground_height_sum += gp.z();
       cell.ground_height_count += 1u;
     }
+    have_new_data_ = true;
   } catch (const std::exception & e) {
     RCLCPP_ERROR(node->get_logger(),
       "GroundConsistencyLayer: Failed to process ground cloud: %s", e.what());
@@ -348,30 +497,10 @@ void GroundConsistencyLayer::nongroundCloudCallback(
       cell.obstacle_min_height = std::min(cell.obstacle_min_height, gp.z());
       cell.obstacle_max_height = std::max(cell.obstacle_max_height, gp.z());
     }
+    have_new_data_ = true;
   } catch (const std::exception & e) {
     RCLCPP_ERROR(node->get_logger(),
       "GroundConsistencyLayer: Failed to process non-ground cloud: %s", e.what());
-  }
-}
-
-void GroundConsistencyLayer::integrateFrameCountsIntoScores()
-{
-  ground_points_this_cycle_ = 0;
-  nonground_points_this_cycle_ = 0;
-
-  for (auto & [key, cell] : cells_) {
-    if (cell.ground_count_frame > 0) {
-      ground_points_this_cycle_ += cell.ground_count_frame;
-      cell.ground_score = static_cast<float>(
-        std::min<double>(max_score_, cell.ground_score + cell.ground_count_frame * ground_inc_));
-      cell.ground_count_frame = 0;
-    }
-    if (cell.nonground_count_frame > 0) {
-      nonground_points_this_cycle_ += cell.nonground_count_frame;
-      cell.nonground_score = static_cast<float>(
-        std::min<double>(max_score_, cell.nonground_score + cell.nonground_count_frame * nonground_inc_));
-      cell.nonground_count_frame = 0;
-    }
   }
 }
 
@@ -381,181 +510,29 @@ void GroundConsistencyLayer::updateCosts(
 {
   std::lock_guard<std::mutex> lock(mutex_);
 
-  cells_updated_this_cycle_ = 0;
-  cells_decayed_this_cycle_ = 0;
-
-  integrateFrameCountsIntoScores();
-
-  const double res = getResolution();
-
-  // Clear robot footprint evidence to prevent self-blocking
+  // Clear footprint on the master grid
   if (footprint_clearing_enabled_ && !transformed_footprint_.empty()) {
-    // Find bounds of footprint in world coordinates
-    double fp_min_x = std::numeric_limits<double>::max();
-    double fp_min_y = std::numeric_limits<double>::max();
-    double fp_max_x = std::numeric_limits<double>::lowest();
-    double fp_max_y = std::numeric_limits<double>::lowest();
-
-    for (const auto & pt : transformed_footprint_) {
-      fp_min_x = std::min(fp_min_x, pt.x);
-      fp_min_y = std::min(fp_min_y, pt.y);
-      fp_max_x = std::max(fp_max_x, pt.x);
-      fp_max_y = std::max(fp_max_y, pt.y);
-    }
-
-    const int32_t min_xi = static_cast<int32_t>(std::floor(fp_min_x / res));
-    const int32_t min_yi = static_cast<int32_t>(std::floor(fp_min_y / res));
-    const int32_t max_xi = static_cast<int32_t>(std::floor(fp_max_x / res));
-    const int32_t max_yi = static_cast<int32_t>(std::floor(fp_max_y / res));
-
-    // Remove evidence only for cells whose center lies inside the footprint polygon
-    for (int32_t xi = min_xi; xi <= max_xi; ++xi) {
-      for (int32_t yi = min_yi; yi <= max_yi; ++yi) {
-        double px = (static_cast<double>(xi) + 0.5) * res;
-        double py = (static_cast<double>(yi) + 0.5) * res;
-
-        // Ray-casting point-in-polygon test
-        bool inside = false;
-        size_t n = transformed_footprint_.size();
-        for (size_t i = 0, j = n - 1; i < n; j = i++) {
-          const auto & a = transformed_footprint_[i];
-          const auto & b = transformed_footprint_[j];
-          if ((a.y > py) != (b.y > py) &&
-              px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x) {
-            inside = !inside;
-          }
-        }
-        if (inside) {
-          cells_.erase(packXY(xi, yi));
-        }
-      }
-    }
-
-    // Also mark the costmap cells as FREE_SPACE for immediate effect
     setConvexPolygonCost(transformed_footprint_, nav2_costmap_2d::FREE_SPACE);
   }
 
-  const float gd = static_cast<float>(ground_decay_);
-  const float nd = static_cast<float>(nonground_decay_);
+  unsigned char * master_array = master_grid.getCharMap();
+  unsigned int size_x = master_grid.getSizeInCellsX();
+  const double res = getResolution();
 
-  // Optional hard obstacle thresholds (keep your existing params)
-  const float oth = static_cast<float>(nonground_occ_thresh_);
-  const float pth = static_cast<float>(nonground_prob_thresh_);
-  const float eps = 1e-5f;
+  // Write pre-computed costs to master grid via raw pointer
+  for (const auto & [key, cell] : cells_) {
+    int32_t xi = unpackX(key);
+    int32_t yi = unpackY(key);
+    double wx = (static_cast<double>(xi) + 0.5) * res;
+    double wy = (static_cast<double>(yi) + 0.5) * res;
 
-  // Rolling window bounds in world
-  double min_wx, min_wy, max_wx, max_wy;
-  master_grid.mapToWorld(min_i, min_j, min_wx, min_wy);
-  master_grid.mapToWorld(max_i, max_j, max_wx, max_wy);
-
-  if (min_wx > max_wx) std::swap(min_wx, max_wx);
-  if (min_wy > max_wy) std::swap(min_wy, max_wy);
-
-  // pad by one cell
-  min_wx -= res; min_wy -= res;
-  max_wx += res; max_wy += res;
-
-  auto cellCenter = [&](int32_t xi, int32_t yi, double & wx, double & wy) {
-    wx = (static_cast<double>(xi) + 0.5) * res;
-    wy = (static_cast<double>(yi) + 0.5) * res;
-  };
-
-  auto inWindow = [&](double wx, double wy) -> bool {
-    return wx >= min_wx && wx <= max_wx && wy >= min_wy && wy <= max_wy;
-  };
-
-  // Only decay when new observations arrived; no data = belief unchanged
-  bool have_new_data = (ground_points_this_cycle_ > 0 || nonground_points_this_cycle_ > 0);
-
-  // Single pass: decay, compute costs, erase dead cells
-  size_t total_ground_cells = 0;
-  size_t total_nonground_cells = 0;
-
-  for (auto it = cells_.begin(); it != cells_.end(); ) {
-    auto & cell = it->second;
-    int32_t xi = unpackX(it->first);
-    int32_t yi = unpackY(it->first);
-    double wx, wy;
-    cellCenter(xi, yi, wx, wy);
-
-    // Erase out-of-window cells
-    if (!inWindow(wx, wy)) {
-      it = cells_.erase(it);
-      continue;
-    }
-
-    // Decay scores only when sensor is actively providing data
-    if (have_new_data) {
-      bool decayed = false;
-      if (cell.ground_score > 0.0f) {
-        cell.ground_score *= gd;
-        decayed = true;
-      }
-      if (cell.nonground_score > 0.0f) {
-        cell.nonground_score *= nd;
-        decayed = true;
-      }
-      if (decayed) cells_decayed_this_cycle_++;
-
-      // Erase cells with no remaining evidence
-      if (cell.ground_score < 1e-3f && cell.nonground_score < 1e-3f) {
-        it = cells_.erase(it);
-        continue;
-      }
-
-      // Clamp tiny scores to zero
-      if (cell.ground_score < 1e-3f) cell.ground_score = 0.0f;
-      if (cell.nonground_score < 1e-3f) cell.nonground_score = 0.0f;
-    }
-
-    // Count for KPI
-    if (cell.ground_score > 0.0f) total_ground_cells++;
-    if (cell.nonground_score > 0.0f) total_nonground_cells++;
-
-    // Compute cost
-    float g = cell.ground_score;
-    float ng = cell.nonground_score;
-    const float denom = ng + g + eps;
-    const float p_occ = ng / denom;
-    uint8_t cost = static_cast<uint8_t>(std::clamp(p_occ * 252.0f, 0.0f, 252.0f));
-
-    bool make_lethal = false;
-    bool make_free = false;
-    if (ng >= oth && p_occ > pth) {
-      double ground_avg = 0.0;
-      if (cell.ground_height_count > 0u) {
-        ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
-      }
-
-      double step_height = cell.obstacle_min_height - ground_avg;
-      double obstacle_height = cell.obstacle_max_height - ground_avg;
-
-      bool is_tunnel = step_height > robot_height_;
-      bool is_small_obstacle = obstacle_height < min_clearance_;
-
-      if (is_tunnel || is_small_obstacle) {
-        make_free = true;
-      } else {
-        make_lethal = true;
-      }
-    }
-
-    if (make_lethal) {
-      cost = nav2_costmap_2d::LETHAL_OBSTACLE;
-    } else if (make_free) {
-      cost = nav2_costmap_2d::FREE_SPACE;
-    }
-
-    // Write cost to master grid
     unsigned int mx, my;
-    if (master_grid.worldToMap(wx, wy, mx, my)) {
-      if ((int)mx >= min_i && (int)mx < max_i && (int)my >= min_j && (int)my < max_j) {
-        master_grid.setCost(mx, my, cost);
-        cells_updated_this_cycle_++;
-      }
-    }
+    if (!master_grid.worldToMap(wx, wy, mx, my)) continue;
+    if (static_cast<int>(mx) < min_i || static_cast<int>(mx) >= max_i ||
+        static_cast<int>(my) < min_j || static_cast<int>(my) >= max_j) continue;
 
-    ++it;
+    master_array[my * size_x + mx] = cell.computed_cost;
+    cells_updated_this_cycle_++;
   }
 
   // Record KPI metrics
@@ -565,14 +542,13 @@ void GroundConsistencyLayer::updateCosts(
     snapshot.total_cycle_latency_ms = kpi_tracker_->getTotalTime();
     snapshot.cells_updated = cells_updated_this_cycle_;
     snapshot.cells_decayed = cells_decayed_this_cycle_;
-    snapshot.total_ground_cells = total_ground_cells;
-    snapshot.total_nonground_cells = total_nonground_cells;
+    snapshot.total_ground_cells = total_ground_cells_;
+    snapshot.total_nonground_cells = total_nonground_cells_;
     
-    // Memory: single map with CellData struct + bucket overhead
     size_t entries = cells_.size();
-    const size_t node_overhead = 56;  // libstdc++ hash node
+    const size_t node_overhead = 56;
     size_t mem_bytes = entries * (node_overhead + sizeof(WorldKey) + sizeof(CellData)) +
-                       std::max(entries, size_t(16)) * 8;  // bucket array
+                       std::max(entries, size_t(16)) * 8;
     snapshot.memory_usage_mb = mem_bytes / (1024.0 * 1024.0);
     
     snapshot.ground_points_processed = ground_points_this_cycle_;
