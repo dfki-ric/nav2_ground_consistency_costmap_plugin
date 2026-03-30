@@ -50,7 +50,7 @@ def format_xaxis(ax):
 
 # Plot 1: Total Cycle Latency (filter out zero-latency cycles)
 df_latency = df[df['total_cycle_ms'] > 0]
-axes[0, 0].plot(df_latency['elapsed_s'], df_latency['total_cycle_ms'], 'b-', linewidth=1.5)
+axes[0, 0].plot(df_latency['elapsed_s'], df_latency['total_cycle_ms'], 'b-', linewidth=1.0)
 axes[0, 0].set_ylabel('Latency (ms)', fontweight='bold')
 axes[0, 0].set_title('Total Cycle Time (updateBounds + updateCosts)')
 format_xaxis(axes[0, 0])
