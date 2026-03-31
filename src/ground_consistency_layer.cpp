@@ -59,12 +59,20 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
   node->get_parameter(name_ + ".tf_timeout", tf_timeout_);
-  node->get_parameter(name_ + ".ground_inc", ground_inc_);
-  node->get_parameter(name_ + ".nonground_inc", nonground_inc_);
-  node->get_parameter(name_ + ".ground_decay", ground_decay_);
-  node->get_parameter(name_ + ".nonground_decay", nonground_decay_);
-  node->get_parameter(name_ + ".nonground_occ_thresh", nonground_occ_thresh_);
-  node->get_parameter(name_ + ".nonground_prob_thresh", nonground_prob_thresh_);
+
+  auto getFloatParam = [&](const std::string & param, float & out) {
+    double tmp;
+    node->get_parameter(param, tmp);
+    out = static_cast<float>(tmp);
+  };
+
+  getFloatParam(name_ + ".ground_inc", ground_inc_);
+  getFloatParam(name_ + ".nonground_inc", nonground_inc_);
+  getFloatParam(name_ + ".ground_decay", ground_decay_);
+  getFloatParam(name_ + ".nonground_decay", nonground_decay_);
+  getFloatParam(name_ + ".nonground_occ_thresh", nonground_occ_thresh_);
+  getFloatParam(name_ + ".nonground_prob_thresh", nonground_prob_thresh_);
+
   node->get_parameter(name_ + ".max_score", max_score_);
   node->get_parameter(name_ + ".min_clearance", min_clearance_);
   node->get_parameter(name_ + ".robot_height", robot_height_);
@@ -169,59 +177,52 @@ void GroundConsistencyLayer::updateBounds(
   ground_points_this_cycle_ = 0;
   nonground_points_this_cycle_ = 0;
 
+  // Transform footprint and update bounds to include it
+  updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
+
   // Clear footprint evidence
-  if (footprint_clearing_enabled_) {
-    updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
+  if (footprint_clearing_enabled_ && !transformed_footprint_.empty()) {
+    const double fp_res = getResolution();
+    // Compute footprint bounding box in cell coordinates
+    double fp_min_x = std::numeric_limits<double>::max();
+    double fp_min_y = std::numeric_limits<double>::max();
+    double fp_max_x = std::numeric_limits<double>::lowest();
+    double fp_max_y = std::numeric_limits<double>::lowest();
+    for (const auto & pt : transformed_footprint_) {
+      fp_min_x = std::min(fp_min_x, pt.x);
+      fp_min_y = std::min(fp_min_y, pt.y);
+      fp_max_x = std::max(fp_max_x, pt.x);
+      fp_max_y = std::max(fp_max_y, pt.y);
+    }
+    const int32_t min_xi = static_cast<int32_t>(std::floor(fp_min_x / fp_res));
+    const int32_t min_yi = static_cast<int32_t>(std::floor(fp_min_y / fp_res));
+    const int32_t max_xi = static_cast<int32_t>(std::floor(fp_max_x / fp_res));
+    const int32_t max_yi = static_cast<int32_t>(std::floor(fp_max_y / fp_res));
+    const size_t n = transformed_footprint_.size();
 
-    if (!transformed_footprint_.empty()) {
-      const double fp_res = getResolution();
-      // Compute footprint bounding box in cell coordinates
-      double fp_min_x = std::numeric_limits<double>::max();
-      double fp_min_y = std::numeric_limits<double>::max();
-      double fp_max_x = std::numeric_limits<double>::lowest();
-      double fp_max_y = std::numeric_limits<double>::lowest();
-      for (const auto & pt : transformed_footprint_) {
-        fp_min_x = std::min(fp_min_x, pt.x);
-        fp_min_y = std::min(fp_min_y, pt.y);
-        fp_max_x = std::max(fp_max_x, pt.x);
-        fp_max_y = std::max(fp_max_y, pt.y);
-      }
-      const int32_t min_xi = static_cast<int32_t>(std::floor(fp_min_x / fp_res));
-      const int32_t min_yi = static_cast<int32_t>(std::floor(fp_min_y / fp_res));
-      const int32_t max_xi = static_cast<int32_t>(std::floor(fp_max_x / fp_res));
-      const int32_t max_yi = static_cast<int32_t>(std::floor(fp_max_y / fp_res));
-      const size_t n = transformed_footprint_.size();
+    for (int32_t xi = min_xi; xi <= max_xi; ++xi) {
+      for (int32_t yi = min_yi; yi <= max_yi; ++yi) {
+        double px = (static_cast<double>(xi) + 0.5) * fp_res;
+        double py = (static_cast<double>(yi) + 0.5) * fp_res;
 
-      for (int32_t xi = min_xi; xi <= max_xi; ++xi) {
-        for (int32_t yi = min_yi; yi <= max_yi; ++yi) {
-          double px = (static_cast<double>(xi) + 0.5) * fp_res;
-          double py = (static_cast<double>(yi) + 0.5) * fp_res;
-
-          // Point-in-polygon test (ray casting)
-          bool inside = false;
-          for (size_t i = 0, j = n - 1; i < n; j = i++) {
-            const auto & a = transformed_footprint_[i];
-            const auto & b = transformed_footprint_[j];
-            if ((a.y > py) != (b.y > py) &&
-                px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x) {
-              inside = !inside;
-            }
+        // Point-in-polygon test (ray casting)
+        bool inside = false;
+        for (size_t i = 0, j = n - 1; i < n; j = i++) {
+          const auto & a = transformed_footprint_[i];
+          const auto & b = transformed_footprint_[j];
+          if ((a.y > py) != (b.y > py) &&
+              px < (b.x - a.x) * (py - a.y) / (b.y - a.y) + a.x) {
+            inside = !inside;
           }
-          if (inside) {
-            cells_.erase(packXY(xi, yi));
-          }
+        }
+        if (inside) {
+          cells_.erase(packXY(xi, yi));
         }
       }
     }
-  } else {
-    updateFootprint(robot_x, robot_y, robot_yaw, min_x, min_y, max_x, max_y);
   }
 
   // Single pass: integrate frame counts, decay, compute costs, cull, compute bounds
-  const float gd = static_cast<float>(ground_decay_);
-  const float nd = static_cast<float>(nonground_decay_);
-  const float oth = static_cast<float>(nonground_occ_thresh_);
-  const float pth = static_cast<float>(nonground_prob_thresh_);
   const float eps = 1e-5f;
   const double max_range_sq = max_data_range_ * max_data_range_;
   const bool use_range_limit = max_data_range_ > 0.0;
@@ -285,11 +286,11 @@ void GroundConsistencyLayer::updateBounds(
     if (have_new_data) {
       bool decayed = false;
       if (cell.ground_score > 0.0f) {
-        cell.ground_score *= gd;
+        cell.ground_score *= ground_decay_;
         decayed = true;
       }
       if (cell.nonground_score > 0.0f) {
-        cell.nonground_score *= nd;
+        cell.nonground_score *= nonground_decay_;
         decayed = true;
       }
       if (decayed) cells_decayed_this_cycle_++;
@@ -316,7 +317,7 @@ void GroundConsistencyLayer::updateBounds(
 
     bool make_lethal = false;
     bool make_free = false;
-    if (ng >= oth && p_occ > pth) {
+    if (ng >= nonground_occ_thresh_ && p_occ > nonground_prob_thresh_) {
       double ground_avg = 0.0;
       if (cell.ground_height_count > 0u) {
         ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);

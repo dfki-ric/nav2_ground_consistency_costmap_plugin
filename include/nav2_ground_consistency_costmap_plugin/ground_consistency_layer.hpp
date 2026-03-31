@@ -81,19 +81,19 @@ private:
   double tf_timeout_{0.1};
 
   // Evidence model
-  double ground_inc_{1.0};       // added per point (scaled by count)
-  double nonground_inc_{1.5};    // added per point (scaled by count)
-  double ground_decay_{0.92};    // multiplied each costmap update (0..1)
-  double nonground_decay_{0.90}; // multiplied each costmap update (0..1)
+  float ground_inc_{1.0f};
+  float nonground_inc_{1.5f};
+  float ground_decay_{0.92f};
+  float nonground_decay_{0.90f};
 
-  double nonground_occ_thresh_{2.0};    // nonground score must exceed to be OCCUPIED
-  double nonground_prob_thresh_{0.750}; // nonground probability must exceed to be OCCUPIED
+  float nonground_occ_thresh_{2.0f};
+  float nonground_prob_thresh_{0.750f};
 
-  double max_score_{1000.0};     // clamp to avoid overflow
+  double max_score_{1000.0};
 
-  double min_clearance_{0.1};    // 10 cm: small obstacles max height
-  double robot_height_{1.2};     // 1.2 m: tunnel detection threshold
-  double max_data_range_{0.0};   // max distance from robot to retain data (0 = disabled)
+  double min_clearance_{0.1};
+  double robot_height_{1.2};
+  double max_data_range_{0.0};
 
   // Footprint clearing
   bool footprint_clearing_enabled_{true};
