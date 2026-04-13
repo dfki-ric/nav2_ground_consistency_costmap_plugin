@@ -55,6 +55,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("footprint_clearing_enabled", rclcpp::ParameterValue(true));
   declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
   declareParameter("max_data_range", rclcpp::ParameterValue(0.0));
+  declareParameter("discretize_costs", rclcpp::ParameterValue(false));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -79,6 +80,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".footprint_clearing_enabled", footprint_clearing_enabled_);
   node->get_parameter(name_ + ".enable_kpi_logging", kpi_enabled_);
   node->get_parameter(name_ + ".max_data_range", max_data_range_);
+  node->get_parameter(name_ + ".discretize_costs", discretize_costs_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
@@ -336,6 +338,13 @@ void GroundConsistencyLayer::updateBounds(
     if (make_lethal) {
       cost = nav2_costmap_2d::LETHAL_OBSTACLE;
     } else if (make_free) {
+      cost = nav2_costmap_2d::FREE_SPACE;
+    }
+
+    // Discretize partial costs to FREE if enabled
+    if (discretize_costs_ && 
+        cost != nav2_costmap_2d::LETHAL_OBSTACLE && 
+        cost != nav2_costmap_2d::FREE_SPACE) {
       cost = nav2_costmap_2d::FREE_SPACE;
     }
 

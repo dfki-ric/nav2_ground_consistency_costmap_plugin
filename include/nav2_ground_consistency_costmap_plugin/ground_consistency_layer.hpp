@@ -90,6 +90,7 @@ private:
   float nonground_prob_thresh_{0.750f};
 
   double max_score_{1000.0};
+  bool discretize_costs_{false};
 
   double min_clearance_{0.1};
   double robot_height_{1.2};
