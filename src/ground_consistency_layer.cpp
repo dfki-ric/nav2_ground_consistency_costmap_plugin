@@ -56,6 +56,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
   declareParameter("max_data_range", rclcpp::ParameterValue(0.0));
   declareParameter("discretize_costs", rclcpp::ParameterValue(false));
+  declareParameter("one_shot_mode", rclcpp::ParameterValue(false));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -81,6 +82,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".enable_kpi_logging", kpi_enabled_);
   node->get_parameter(name_ + ".max_data_range", max_data_range_);
   node->get_parameter(name_ + ".discretize_costs", discretize_costs_);
+  node->get_parameter(name_ + ".one_shot_mode", one_shot_mode_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
@@ -224,6 +226,11 @@ void GroundConsistencyLayer::updateBounds(
     }
   }
 
+  // In one-shot mode, clear all old evidence before processing new scan
+  if (one_shot_mode_) {
+    cells_.clear();
+  }
+
   // Single pass: integrate frame counts, decay, compute costs, cull, compute bounds
   const float eps = 1e-5f;
   const double max_range_sq = max_data_range_ * max_data_range_;
@@ -284,8 +291,8 @@ void GroundConsistencyLayer::updateBounds(
       cell.nonground_count_frame = 0;
     }
 
-    // Decay scores only when sensor is actively providing data
-    if (have_new_data) {
+    // Decay scores only when sensor is actively providing data (skip in one-shot mode)
+    if (have_new_data && !one_shot_mode_) {
       bool decayed = false;
       if (cell.ground_score > 0.0f) {
         cell.ground_score *= ground_decay_;
