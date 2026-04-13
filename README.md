@@ -4,9 +4,14 @@
 
 ## Overview
 
-A Nav2 costmap layer that fuses ground and non-ground point cloud evidence into a probabilistic occupancy estimate with temporal decay and height-aware filtering.
+A Nav2 costmap layer that fuses ground and non-ground point cloud evidence into an occupancy estimate.
 
-It consumes the output of a ground segmentation node (two PointCloud2 topics) and integrates it directly into Nav2's costmap stack. The layer accumulates per-cell evidence scores, decays them over time, and uses ground height statistics to classify obstacles as blocking, passable (small), or overhead (tunnels).
+It consumes the output of a ground segmentation node (two PointCloud2 topics) and integrates it directly into Nav2's costmap stack. The layer supports two processing modes:
+
+- **Temporal Mode** (default): Accumulates per-cell evidence scores across frames and decays them over time. Best for systems with good odometry and sparse sensor data.
+- **One-Shot Mode**: Processes only the latest data frame without accumulation. Best for systems with poor odometry or dense sensor data.
+
+Both modes use ground height statistics to classify obstacles as blocking, passable (small), or overhead (tunnels).
 
 ## Subscribed Topics
 
@@ -36,6 +41,8 @@ Both clouds are transformed into the costmap's global frame via TF2.
 | `footprint_clearing_enabled` | `true` | Clear evidence under the robot footprint polygon |
 | `max_data_range` | `0.0` | Max distance (m) from robot to retain cell data. `0` = disabled (use costmap window only) |
 | `enable_kpi_logging` | `false` | Write per-cycle metrics to `/tmp/costmap_kpi_*.csv` |
+| `one_shot_mode` | `false` | Process only latest data frame (true) vs accumulate evidence across frames (false) |
+| `discretize_costs` | `false` | Output binary costs: LETHAL or FREE only (true) vs probabilistic gradients (false) |
 
 ## Occupancy Model
 
@@ -114,11 +121,35 @@ local_costmap:
       footprint_clearing_enabled: true
       max_data_range: 0.0
       enable_kpi_logging: false
+      one_shot_mode: false
+      discretize_costs: false
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
 ```
 
 This layer serves as an alternative to `obstacle_layer` for systems with ground segmentation. It is typically used alongside `inflation_layer`.
+
+## Processing Modes
+
+### Temporal Mode (Default)
+
+Evidence accumulates across frames and decays over time:
+- **Score integration**: `score += count * increment`
+- **Decay (per frame)**: `score *= decay_factor` (only when new data arrives)
+- **Response**: Slow but stable; needs multiple scans to exceed thresholds
+- **Best for**: Good odometry, sparse sensors, need for stable estimates
+- **Configuration**: `one_shot_mode: false`, `ground_decay: 0.92`, `nonground_decay: 0.90`
+
+### One-Shot Mode
+
+Processes only the current frame's data without accumulation:
+- **Score integration**: `score = count * increment` (replaces old score)
+- **Decay**: None applied
+- **Callback sync**: Only processes when both ground and nonground callbacks have fired
+- **Response**: Instant; single frame with sufficient points can trigger detection
+- **Best for**: Poor odometry, dense sensors, immediate response needed
+- **Advantage for bad odometry**: Fresh data only per frame means wrong transformations disappear next cycle instead of persisting
+- **Configuration**: `one_shot_mode: true`, higher `nonground_occ_thresh` and `nonground_prob_thresh` (e.g., 5.0 and 0.90)
 
 ## Dependencies
 
@@ -131,23 +162,48 @@ This layer serves as an alternative to `obstacle_layer` for systems with ground 
 
 ## Tuning Guide
 
+### Mode Selection
+
+**Use Temporal Mode if**:
+- Robot odometry is stable and accurate
+- Sensor provides sparse data
+- Need smooth, stable costmap
+- Can tolerate slightly delayed obstacle detection
+
+**Use One-Shot Mode if**:
+- Robot odometry is poor or uncertain
+- Sensor provides dense point clouds per frame
+- Need immediate response to new obstacles
+- Can tolerate flickering if callbacks are delayed
+
+### Occupancy Sensitivity
+
 To increase traversable area (fewer obstacles):
 - Decrease `robot_height` (more areas classified as tunnels)
 - Increase `min_clearance` (more small obstacles ignored)
 - Lower `nonground_occ_thresh` or `nonground_prob_thresh`
-- Increase decay factors (evidence persists longer)
+- In temporal mode: Increase decay factors (evidence persists longer)
 
 To increase obstacle avoidance (more conservative):
 - Increase `robot_height` (fewer tunnels)
 - Decrease `min_clearance` (fewer small obstacles ignored)
 - Raise `nonground_occ_thresh` or `nonground_prob_thresh`
-- Decrease decay factors (evidence fades faster)
+- In temporal mode: Decrease decay factors (evidence fades faster)
+
+### One-Shot Mode Tuning
+
+In one-shot mode, set conservative thresholds to avoid false positives:
+- `nonground_occ_thresh: 4.0-5.0` (requires 3+ points per frame)
+- `nonground_prob_thresh: 0.85-0.90` (requires strong dominance)
+- Use `discretize_costs: true` for clean binary output
 
 ## Design Decisions
 
 ### Why Passive Decay Instead of Raytracing
 
-The layer uses temporal decay to clear stale evidence rather than active raytracing. Ground points already represent confirmed ground, which implies obstacle-free space. Height statistics persist independently of score decay, so classification remains informed even as scores fade. This is computationally cheaper than raytracing (O(n) accumulation + O(k) decay vs O(n*m) raycasting) and naturally handles dynamic environments through tunable decay rates.
+In temporal mode, the layer uses temporal decay to clear stale evidence rather than active raytracing. Ground points already represent confirmed ground, which implies obstacle-free space. Height statistics persist independently of score decay, so classification remains informed even as scores fade. This is computationally cheaper than raytracing (O(n) accumulation + O(k) decay vs O(n*m) raycasting) and naturally handles dynamic environments through tunable decay rates.
+
+In one-shot mode, decay is not applied; instead, evidence is replaced each frame, providing immediate responsiveness to sensor changes.
 
 ### Why PointCloud2 Only
 
