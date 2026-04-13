@@ -327,17 +327,20 @@ void GroundConsistencyLayer::updateBounds(
     bool make_lethal = false;
     bool make_free = false;
     if (ng >= nonground_occ_thresh_ && p_occ > nonground_prob_thresh_) {
-      double ground_avg = 0.0;
       if (cell.ground_height_count > 0u) {
-        ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
-      }
+        // We have ground data, apply height filtering
+        double ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
+        double step_height = cell.obstacle_min_height - ground_avg;
+        double obstacle_height = cell.obstacle_max_height - ground_avg;
 
-      double step_height = cell.obstacle_min_height - ground_avg;
-      double obstacle_height = cell.obstacle_max_height - ground_avg;
-
-      if (step_height > robot_height_ || obstacle_height < min_clearance_) {
-        make_free = true;
+        if (step_height > robot_height_ || obstacle_height < min_clearance_) {
+          make_free = true;
+        } else {
+          make_lethal = true;
+        }
       } else {
+        // No ground data yet, be conservative: LETHAL
+        // (high obstacle evidence without counter-evidence from ground truth)
         make_lethal = true;
       }
     }
