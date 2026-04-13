@@ -125,6 +125,8 @@ private:
 
   std::mutex mutex_;
   bool have_new_data_{false};
+  bool ground_arrived_this_cycle_{false};
+  bool nonground_arrived_this_cycle_{false};
 
   // KPI Tracking
   std::unique_ptr<KPITracker> kpi_tracker_;

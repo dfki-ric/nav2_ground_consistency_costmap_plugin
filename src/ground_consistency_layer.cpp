@@ -226,11 +226,9 @@ void GroundConsistencyLayer::updateBounds(
     }
   }
 
-  // In one-shot mode, clear all old evidence before processing new scan
-  if (one_shot_mode_) {
-    cells_.clear();
-  }
-
+  // In one-shot mode, only process if both ground and nonground data arrived this cycle
+  const bool should_process = !one_shot_mode_ || (ground_arrived_this_cycle_ && nonground_arrived_this_cycle_);
+  
   // Single pass: integrate frame counts, decay, compute costs, cull, compute bounds
   const float eps = 1e-5f;
   const double max_range_sq = max_data_range_ * max_data_range_;
@@ -238,6 +236,15 @@ void GroundConsistencyLayer::updateBounds(
   const double res = getResolution();
   const bool have_new_data = have_new_data_;
   have_new_data_ = false;
+
+  // Reset cycle flags at start for next cycle
+  ground_arrived_this_cycle_ = false;
+  nonground_arrived_this_cycle_ = false;
+
+  // If one-shot mode and missing callbacks, skip processing but keep old data
+  if (!should_process) {
+    return;
+  }
 
   // Rolling window bounds for culling cells outside the costmap
   const nav2_costmap_2d::Costmap2D * master = layered_costmap_->getCostmap();
@@ -253,6 +260,16 @@ void GroundConsistencyLayer::updateBounds(
 
   size_t total_ground_cells = 0;
   size_t total_nonground_cells = 0;
+
+  // In one-shot mode, clear ALL old scores before processing new frame
+  // This is necessary so cells without new data don't carry old obstacles
+  // Only happens when both callbacks arrive, so not every frame
+  if (one_shot_mode_ && should_process) {
+    for (auto & [key, cell] : cells_) {
+      cell.ground_score = 0.0f;
+      cell.nonground_score = 0.0f;
+    }
+  }
 
   for (auto it = cells_.begin(); it != cells_.end(); ) {
     auto & cell = it->second;
@@ -280,14 +297,28 @@ void GroundConsistencyLayer::updateBounds(
     // Integrate frame counts into scores
     if (cell.ground_count_frame > 0) {
       ground_points_this_cycle_ += cell.ground_count_frame;
-      cell.ground_score = static_cast<float>(
-        std::min<double>(max_score_, cell.ground_score + cell.ground_count_frame * ground_inc_));
+      double new_score = cell.ground_count_frame * ground_inc_;
+      if (one_shot_mode_) {
+        // One-shot: replace score with new data only
+        cell.ground_score = static_cast<float>(std::min<double>(max_score_, new_score));
+      } else {
+        // Temporal: accumulate with old score
+        cell.ground_score = static_cast<float>(
+          std::min<double>(max_score_, cell.ground_score + new_score));
+      }
       cell.ground_count_frame = 0;
     }
     if (cell.nonground_count_frame > 0) {
       nonground_points_this_cycle_ += cell.nonground_count_frame;
-      cell.nonground_score = static_cast<float>(
-        std::min<double>(max_score_, cell.nonground_score + cell.nonground_count_frame * nonground_inc_));
+      double new_score = cell.nonground_count_frame * nonground_inc_;
+      if (one_shot_mode_) {
+        // One-shot: replace score with new data only
+        cell.nonground_score = static_cast<float>(std::min<double>(max_score_, new_score));
+      } else {
+        // Temporal: accumulate with old score
+        cell.nonground_score = static_cast<float>(
+          std::min<double>(max_score_, cell.nonground_score + new_score));
+      }
       cell.nonground_count_frame = 0;
     }
 
@@ -477,6 +508,7 @@ void GroundConsistencyLayer::groundCloudCallback(
       cell.ground_height_count += 1u;
     }
     have_new_data_ = true;
+    ground_arrived_this_cycle_ = true;
   } catch (const std::exception & e) {
     RCLCPP_ERROR(node->get_logger(),
       "GroundConsistencyLayer: Failed to process ground cloud: %s", e.what());
@@ -531,6 +563,7 @@ void GroundConsistencyLayer::nongroundCloudCallback(
       cell.obstacle_max_height = std::max(cell.obstacle_max_height, gp.z());
     }
     have_new_data_ = true;
+    nonground_arrived_this_cycle_ = true;
   } catch (const std::exception & e) {
     RCLCPP_ERROR(node->get_logger(),
       "GroundConsistencyLayer: Failed to process non-ground cloud: %s", e.what());
