@@ -8,6 +8,10 @@ A Nav2 costmap layer that fuses ground and non-ground point cloud evidence into 
 
 It consumes the output of a ground segmentation node (two PointCloud2 topics) and integrates it directly into Nav2's costmap stack. The layer accumulates per-cell evidence scores across frames and decays them over time, providing stable occupancy estimates suitable for navigation planning. Ground height statistics are used to classify obstacles as blocking, passable (small), or overhead (tunnels).
 
+## Ground Segmentation
+
+This layer requires a ground segmentation algorithm to separate ground and non-ground points. Consider using [DFKI's ground_segmentation_ros2](https://github.com/dfki-ric/ground_segmentation_ros2) for robust ground plane estimation from LiDAR data.
+
 ## Subscribed Topics
 
 | Topic | Type | Description |
