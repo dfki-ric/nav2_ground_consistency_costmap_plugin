@@ -125,7 +125,6 @@ This layer serves as an alternative to `obstacle_layer` for systems with ground 
 ## Alternative: Non-Persistent Voxel Layer
 
 For systems requiring stateless, non-accumulating obstacle detection (e.g., poor odometry), consider using Nav2's **Non-Persistent Voxel Layer (NPVL)** instead. NPVL processes only the current sensor frame without evidence accumulation, making it lightweight and responsive to immediate sensor changes. Refer to [Nav2 NPVL documentation](https://github.com/ros-planning/navigation2/tree/humble/nav2_costmap_2d) for configuration.
-- **Configuration**: `one_shot_mode: true`, higher `nonground_occ_thresh` and `nonground_prob_thresh` (e.g., 5.0 and 0.90)
 
 ## Dependencies
 
@@ -138,48 +137,25 @@ For systems requiring stateless, non-accumulating obstacle detection (e.g., poor
 
 ## Tuning Guide
 
-### Mode Selection
-
-**Use Temporal Mode if**:
-- Robot odometry is stable and accurate
-- Sensor provides sparse data
-- Need smooth, stable costmap
-- Can tolerate slightly delayed obstacle detection
-
-**Use One-Shot Mode if**:
-- Robot odometry is poor or uncertain
-- Sensor provides dense point clouds per frame
-- Need immediate response to new obstacles
-- Can tolerate flickering if callbacks are delayed
-
 ### Occupancy Sensitivity
 
 To increase traversable area (fewer obstacles):
 - Decrease `robot_height` (more areas classified as tunnels)
 - Increase `min_clearance` (more small obstacles ignored)
 - Lower `nonground_occ_thresh` or `nonground_prob_thresh`
-- In temporal mode: Increase decay factors (evidence persists longer)
+- Increase decay factors (evidence persists longer)
 
 To increase obstacle avoidance (more conservative):
 - Increase `robot_height` (fewer tunnels)
 - Decrease `min_clearance` (fewer small obstacles ignored)
 - Raise `nonground_occ_thresh` or `nonground_prob_thresh`
-- In temporal mode: Decrease decay factors (evidence fades faster)
-
-### One-Shot Mode Tuning
-
-In one-shot mode, set conservative thresholds to avoid false positives:
-- `nonground_occ_thresh: 4.0-5.0` (requires 3+ points per frame)
-- `nonground_prob_thresh: 0.85-0.90` (requires strong dominance)
-- Use `discretize_costs: true` for clean binary output
+- Decrease decay factors (evidence fades faster)
 
 ## Design Decisions
 
 ### Why Passive Decay Instead of Raytracing
 
-In temporal mode, the layer uses temporal decay to clear stale evidence rather than active raytracing. Ground points already represent confirmed ground, which implies obstacle-free space. Height statistics persist independently of score decay, so classification remains informed even as scores fade. This is computationally cheaper than raytracing (O(n) accumulation + O(k) decay vs O(n*m) raycasting) and naturally handles dynamic environments through tunable decay rates.
-
-In one-shot mode, decay is not applied; instead, evidence is replaced each frame, providing immediate responsiveness to sensor changes.
+The layer uses temporal decay to clear stale evidence rather than active raytracing. Ground points already represent confirmed ground, which implies obstacle-free space. Height statistics persist independently of score decay, so classification remains informed even as scores fade. This is computationally cheaper than raytracing (O(n) accumulation + O(k) decay vs O(n*m) raycasting) and naturally handles dynamic environments through tunable decay rates.
 
 ### Why PointCloud2 Only
 
