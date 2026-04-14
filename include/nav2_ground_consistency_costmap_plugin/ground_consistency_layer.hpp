@@ -91,7 +91,6 @@ private:
 
   double max_score_{1000.0};
   bool discretize_costs_{false};
-  bool one_shot_mode_{false};
 
   double min_clearance_{0.1};
   double robot_height_{1.2};
@@ -125,8 +124,6 @@ private:
 
   std::mutex mutex_;
   bool have_new_data_{false};
-  bool ground_arrived_this_cycle_{false};
-  bool nonground_arrived_this_cycle_{false};
 
   // KPI Tracking
   std::unique_ptr<KPITracker> kpi_tracker_;

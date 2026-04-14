@@ -6,12 +6,7 @@
 
 A Nav2 costmap layer that fuses ground and non-ground point cloud evidence into an occupancy estimate.
 
-It consumes the output of a ground segmentation node (two PointCloud2 topics) and integrates it directly into Nav2's costmap stack. The layer supports two processing modes:
-
-- **Temporal Mode** (default): Accumulates per-cell evidence scores across frames and decays them over time. Best for systems with good odometry and sparse sensor data.
-- **One-Shot Mode**: Processes only the latest data frame without accumulation. Best for systems with poor odometry or dense sensor data.
-
-Both modes use ground height statistics to classify obstacles as blocking, passable (small), or overhead (tunnels).
+It consumes the output of a ground segmentation node (two PointCloud2 topics) and integrates it directly into Nav2's costmap stack. The layer accumulates per-cell evidence scores across frames and decays them over time, providing stable occupancy estimates suitable for navigation planning. Ground height statistics are used to classify obstacles as blocking, passable (small), or overhead (tunnels).
 
 ## Subscribed Topics
 
@@ -41,8 +36,7 @@ Both clouds are transformed into the costmap's global frame via TF2.
 | `footprint_clearing_enabled` | `true` | Clear evidence under the robot footprint polygon |
 | `max_data_range` | `0.0` | Max distance (m) from robot to retain cell data. `0` = disabled (use costmap window only) |
 | `enable_kpi_logging` | `false` | Write per-cycle metrics to `/tmp/costmap_kpi_*.csv` |
-| `one_shot_mode` | `false` | Process only latest data frame (true) vs accumulate evidence across frames (false) |
-| `discretize_costs` | `false` | Output binary costs: LETHAL or FREE only (true) vs probabilistic gradients (false) |
+| `discretize_costs` | `false` | Output binary costs (LETHAL or FREE only) instead of probabilistic gradients |
 
 ## Occupancy Model
 
@@ -121,7 +115,6 @@ local_costmap:
       footprint_clearing_enabled: true
       max_data_range: 0.0
       enable_kpi_logging: false
-      one_shot_mode: false
       discretize_costs: false
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
@@ -129,26 +122,9 @@ local_costmap:
 
 This layer serves as an alternative to `obstacle_layer` for systems with ground segmentation. It is typically used alongside `inflation_layer`.
 
-## Processing Modes
+## Alternative: Non-Persistent Voxel Layer
 
-### Temporal Mode (Default)
-
-Evidence accumulates across frames and decays over time:
-- **Score integration**: `score += count * increment`
-- **Decay (per frame)**: `score *= decay_factor` (only when new data arrives)
-- **Response**: Slow but stable; needs multiple scans to exceed thresholds
-- **Best for**: Good odometry, sparse sensors, need for stable estimates
-- **Configuration**: `one_shot_mode: false`, `ground_decay: 0.92`, `nonground_decay: 0.90`
-
-### One-Shot Mode
-
-Processes only the current frame's data without accumulation:
-- **Score integration**: `score = count * increment` (replaces old score)
-- **Decay**: None applied
-- **Callback sync**: Only processes when both ground and nonground callbacks have fired
-- **Response**: Instant; single frame with sufficient points can trigger detection
-- **Best for**: Poor odometry, dense sensors, immediate response needed
-- **Advantage for bad odometry**: Fresh data only per frame means wrong transformations disappear next cycle instead of persisting
+For systems requiring stateless, non-accumulating obstacle detection (e.g., poor odometry), consider using Nav2's **Non-Persistent Voxel Layer (NPVL)** instead. NPVL processes only the current sensor frame without evidence accumulation, making it lightweight and responsive to immediate sensor changes. Refer to [Nav2 NPVL documentation](https://github.com/ros-planning/navigation2/tree/humble/nav2_costmap_2d) for configuration.
 - **Configuration**: `one_shot_mode: true`, higher `nonground_occ_thresh` and `nonground_prob_thresh` (e.g., 5.0 and 0.90)
 
 ## Dependencies
