@@ -55,6 +55,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("footprint_clearing_enabled", rclcpp::ParameterValue(true));
   declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
   declareParameter("max_data_range", rclcpp::ParameterValue(0.0));
+  declareParameter("discretize_costs", rclcpp::ParameterValue(false));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -79,6 +80,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".footprint_clearing_enabled", footprint_clearing_enabled_);
   node->get_parameter(name_ + ".enable_kpi_logging", kpi_enabled_);
   node->get_parameter(name_ + ".max_data_range", max_data_range_);
+  node->get_parameter(name_ + ".discretize_costs", discretize_costs_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
@@ -268,17 +270,19 @@ void GroundConsistencyLayer::updateBounds(
       continue;
     }
 
-    // Integrate frame counts into scores
+    // Integrate frame counts into scores (accumulate)
     if (cell.ground_count_frame > 0) {
       ground_points_this_cycle_ += cell.ground_count_frame;
+      double new_score = cell.ground_count_frame * ground_inc_;
       cell.ground_score = static_cast<float>(
-        std::min<double>(max_score_, cell.ground_score + cell.ground_count_frame * ground_inc_));
+        std::min<double>(max_score_, cell.ground_score + new_score));
       cell.ground_count_frame = 0;
     }
     if (cell.nonground_count_frame > 0) {
       nonground_points_this_cycle_ += cell.nonground_count_frame;
+      double new_score = cell.nonground_count_frame * nonground_inc_;
       cell.nonground_score = static_cast<float>(
-        std::min<double>(max_score_, cell.nonground_score + cell.nonground_count_frame * nonground_inc_));
+        std::min<double>(max_score_, cell.nonground_score + new_score));
       cell.nonground_count_frame = 0;
     }
 
@@ -318,17 +322,20 @@ void GroundConsistencyLayer::updateBounds(
     bool make_lethal = false;
     bool make_free = false;
     if (ng >= nonground_occ_thresh_ && p_occ > nonground_prob_thresh_) {
-      double ground_avg = 0.0;
       if (cell.ground_height_count > 0u) {
-        ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
-      }
+        // We have ground data, apply height filtering
+        double ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
+        double step_height = cell.obstacle_min_height - ground_avg;
+        double obstacle_height = cell.obstacle_max_height - ground_avg;
 
-      double step_height = cell.obstacle_min_height - ground_avg;
-      double obstacle_height = cell.obstacle_max_height - ground_avg;
-
-      if (step_height > robot_height_ || obstacle_height < min_clearance_) {
-        make_free = true;
+        if (step_height > robot_height_ || obstacle_height < min_clearance_) {
+          make_free = true;
+        } else {
+          make_lethal = true;
+        }
       } else {
+        // No ground data yet, be conservative: LETHAL
+        // (high obstacle evidence without counter-evidence from ground truth)
         make_lethal = true;
       }
     }
@@ -336,6 +343,13 @@ void GroundConsistencyLayer::updateBounds(
     if (make_lethal) {
       cost = nav2_costmap_2d::LETHAL_OBSTACLE;
     } else if (make_free) {
+      cost = nav2_costmap_2d::FREE_SPACE;
+    }
+
+    // Discretize partial costs to FREE if enabled
+    if (discretize_costs_ && 
+        cost != nav2_costmap_2d::LETHAL_OBSTACLE && 
+        cost != nav2_costmap_2d::FREE_SPACE) {
       cost = nav2_costmap_2d::FREE_SPACE;
     }
 

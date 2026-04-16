@@ -4,9 +4,13 @@
 
 ## Overview
 
-A Nav2 costmap layer that fuses ground and non-ground point cloud evidence into a probabilistic occupancy estimate with temporal decay and height-aware filtering.
+A Nav2 costmap layer that fuses ground and non-ground point cloud evidence into an occupancy estimate.
 
-It consumes the output of a ground segmentation node (two PointCloud2 topics) and integrates it directly into Nav2's costmap stack. The layer accumulates per-cell evidence scores, decays them over time, and uses ground height statistics to classify obstacles as blocking, passable (small), or overhead (tunnels).
+It consumes the output of a ground segmentation node (two PointCloud2 topics) and integrates it directly into Nav2's costmap stack. The layer accumulates per-cell evidence scores across frames and decays them over time, providing stable occupancy estimates suitable for navigation planning. Ground height statistics are used to classify obstacles as blocking, passable (small), or overhead (tunnels).
+
+## Ground Segmentation
+
+This layer requires a ground segmentation algorithm to separate ground and non-ground points. Consider using [DFKI's ground_segmentation_ros2](https://github.com/dfki-ric/ground_segmentation_ros2) for robust ground plane estimation from LiDAR data.
 
 ## Subscribed Topics
 
@@ -36,6 +40,7 @@ Both clouds are transformed into the costmap's global frame via TF2.
 | `footprint_clearing_enabled` | `true` | Clear evidence under the robot footprint polygon |
 | `max_data_range` | `0.0` | Max distance (m) from robot to retain cell data. `0` = disabled (use costmap window only) |
 | `enable_kpi_logging` | `false` | Write per-cycle metrics to `/tmp/costmap_kpi_*.csv` |
+| `discretize_costs` | `false` | Output binary costs (LETHAL or FREE only) instead of probabilistic gradients |
 
 ## Occupancy Model
 
@@ -114,11 +119,16 @@ local_costmap:
       footprint_clearing_enabled: true
       max_data_range: 0.0
       enable_kpi_logging: false
+      discretize_costs: false
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
 ```
 
 This layer serves as an alternative to `obstacle_layer` for systems with ground segmentation. It is typically used alongside `inflation_layer`.
+
+## Alternative: Non-Persistent Voxel Layer
+
+For systems requiring stateless, non-accumulating obstacle detection (e.g., poor odometry), consider using Nav2's **Non-Persistent Voxel Layer (NPVL)** instead. NPVL processes only the current sensor frame without evidence accumulation, making it lightweight and responsive to immediate sensor changes. Refer to [Nav2 NPVL documentation](https://github.com/ros-planning/navigation2/tree/humble/nav2_costmap_2d) for configuration.
 
 ## Dependencies
 
@@ -130,6 +140,8 @@ This layer serves as an alternative to `obstacle_layer` for systems with ground 
 - geometry_msgs
 
 ## Tuning Guide
+
+### Occupancy Sensitivity
 
 To increase traversable area (fewer obstacles):
 - Decrease `robot_height` (more areas classified as tunnels)
