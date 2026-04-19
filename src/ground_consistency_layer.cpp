@@ -27,6 +27,24 @@ static inline int32_t unpackY(GroundConsistencyLayer::WorldKey k)
   return static_cast<int32_t>(static_cast<uint32_t>(k & 0xFFFFFFFFu));
 }
 
+static bool lookupTF(
+  const std::shared_ptr<tf2_ros::Buffer> & buffer,
+  const std::string & target_frame,
+  const std::string & source_frame,
+  const rclcpp::Time & stamp,
+  double timeout_sec,
+  geometry_msgs::msg::TransformStamped & out_tf)
+{
+  try {
+    out_tf = buffer->lookupTransform(
+      target_frame, source_frame, stamp,
+      rclcpp::Duration::from_seconds(timeout_sec));
+    return true;
+  } catch (const tf2::TransformException &) {
+    return false;
+  }
+}
+
 GroundConsistencyLayer::GroundConsistencyLayer()
 {
   costmap_ = nullptr;
@@ -56,6 +74,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
   declareParameter("max_data_range", rclcpp::ParameterValue(0.0));
   declareParameter("discretize_costs", rclcpp::ParameterValue(false));
+  declareParameter("ground_neighbor_search_radius", rclcpp::ParameterValue(2));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -81,8 +100,14 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".enable_kpi_logging", kpi_enabled_);
   node->get_parameter(name_ + ".max_data_range", max_data_range_);
   node->get_parameter(name_ + ".discretize_costs", discretize_costs_);
+  node->get_parameter(name_ + ".ground_neighbor_search_radius", ground_neighbor_search_radius_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
+
+  // Read robot_base_frame from costmap config
+  std::string robot_base_frame_param;
+  node->get_parameter("robot_base_frame", robot_base_frame_param);
+  robot_base_frame_ = robot_base_frame_param.empty() ? "base_link" : robot_base_frame_param;
 
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
@@ -247,6 +272,18 @@ void GroundConsistencyLayer::updateBounds(
   size_t total_ground_cells = 0;
   size_t total_nonground_cells = 0;
 
+  // Cache robot Z for tier-3 fallback (once per cycle)
+  double cached_robot_z = 0.0;
+  bool have_robot_z = false;
+  {
+    geometry_msgs::msg::TransformStamped robot_tf;
+    if (lookupTF(tf_buffer_, global_frame_, robot_base_frame_,
+                 rclcpp::Time(0), tf_timeout_, robot_tf)) {
+      cached_robot_z = robot_tf.transform.translation.z;
+      have_robot_z = true;
+    }
+  }
+
   for (auto it = cells_.begin(); it != cells_.end(); ) {
     auto & cell = it->second;
     int32_t xi = unpackX(it->first);
@@ -322,21 +359,92 @@ void GroundConsistencyLayer::updateBounds(
     bool make_lethal = false;
     bool make_free = false;
     if (ng >= nonground_occ_thresh_ && p_occ > nonground_prob_thresh_) {
+      double ground_avg = 0.0;
+      bool ground_found = false;
+      int tier_used = 0;  // 0=none, 1=local, 2=neighbor, 3=robot_z
+
+      // Tier 1: Local ground data
       if (cell.ground_height_count > 0u) {
-        // We have ground data, apply height filtering
-        double ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
+        ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
+        ground_found = true;
+        tier_used = 1;
+      }
+
+      // Tier 2: Neighbor interpolation
+      if (!ground_found) {
+        double sum_z = 0.0;
+        uint32_t count = 0;
+        const int r = ground_neighbor_search_radius_;
+        for (int dx = -r; dx <= r; ++dx) {
+          for (int dy = -r; dy <= r; ++dy) {
+            if (dx == 0 && dy == 0) continue;
+            auto n_it = cells_.find(packXY(xi + dx, yi + dy));
+            if (n_it != cells_.end() && n_it->second.ground_height_count > 0u) {
+              sum_z += n_it->second.ground_height_sum /
+                       static_cast<double>(n_it->second.ground_height_count);
+              count++;
+            }
+          }
+        }
+        if (count > 0) {
+          ground_avg = sum_z / count;
+          ground_found = true;
+          tier_used = 2;
+        }
+      }
+
+      // Tier 3: Robot Z fallback
+      if (!ground_found && have_robot_z) {
+        ground_avg = cached_robot_z;
+        ground_found = true;
+        tier_used = 3;
+      }
+
+      // DEBUG: Log for gap cells with high obstacle evidence
+      auto node = node_.lock();
+      if (node && cell.ground_height_count == 0u) {
+        const char* tier_names[] = {"NONE", "T1", "T2", "T3"};
+        RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
+          "GAP_CELL[%d,%d]: tier=%s found=%d obs_min=%.2f obs_max=%.2f ground_avg=%.2f robot_z=%.2f robot_h=%.2f step_h=%.2f",
+          xi, yi, tier_names[tier_used], ground_found,
+          cell.obstacle_min_height, cell.obstacle_max_height, ground_avg,
+          cached_robot_z, robot_height_,
+          ground_found ? (cell.obstacle_min_height - ground_avg) : -999.0);
+      }
+
+      // Apply height filtering or conservative fallback
+      if (ground_found) {
         double step_height = cell.obstacle_min_height - ground_avg;
         double obstacle_height = cell.obstacle_max_height - ground_avg;
 
         if (step_height > robot_height_ || obstacle_height < min_clearance_) {
           make_free = true;
+          
+          // DEBUG: Check if FREE cells are being set for Tier 1 cells (with ground data)
+          if (cell.ground_height_count > 0u) {
+            if (node) {
+              RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
+                "TIER1_FREE: cell[%d,%d] obs_min=%.2f ground_avg=%.2f step_h=%.2f",
+                xi, yi, cell.obstacle_min_height, ground_avg, step_height);
+            }
+          }
         } else {
           make_lethal = true;
+          if (node) {
+            RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
+              "LETHAL_HEIGHT: cell[%d,%d] obs_min=%.2f obs_max=%.2f ground_avg=%.2f step_h=%.2f obs_h=%.2f robot_h=%.2f min_cl=%.2f g_count=%u",
+              xi, yi, cell.obstacle_min_height, cell.obstacle_max_height, ground_avg,
+              step_height, obstacle_height, robot_height_, min_clearance_, cell.ground_height_count);
+          }
         }
       } else {
-        // No ground data yet, be conservative: LETHAL
-        // (high obstacle evidence without counter-evidence from ground truth)
+        // All tiers failed: conservative LETHAL
         make_lethal = true;
+        if (node) {
+          RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
+            "LETHAL_NO_GROUND: cell[%d,%d] obs_min=%.2f obs_max=%.2f",
+            xi, yi, cell.obstacle_min_height, cell.obstacle_max_height);
+        }
       }
     }
 
@@ -354,6 +462,16 @@ void GroundConsistencyLayer::updateBounds(
     }
 
     cell.computed_cost = cost;
+
+    // DEBUG: Check if FREE cells are actually being set for gap cells
+    if (cell.ground_height_count == 0u && make_free) {
+      auto node = node_.lock();
+      if (node) {
+        RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
+          "SETTING_FREE: cell[%d,%d] cost=%d (FREE_SPACE=%d LETHAL=%d)",
+          xi, yi, (int)cost, (int)nav2_costmap_2d::FREE_SPACE, (int)nav2_costmap_2d::LETHAL_OBSTACLE);
+      }
+    }
 
     // Update bounds
     local_min_x = std::min(local_min_x, wx);
@@ -403,24 +521,6 @@ void GroundConsistencyLayer::updateFootprint(
 
   for (unsigned int i = 0; i < transformed_footprint_.size(); ++i) {
     touch(transformed_footprint_[i].x, transformed_footprint_[i].y, min_x, min_y, max_x, max_y);
-  }
-}
-
-static bool lookupTF(
-  const std::shared_ptr<tf2_ros::Buffer> & buffer,
-  const std::string & target_frame,
-  const std::string & source_frame,
-  const rclcpp::Time & stamp,
-  double timeout_sec,
-  geometry_msgs::msg::TransformStamped & out_tf)
-{
-  try {
-    out_tf = buffer->lookupTransform(
-      target_frame, source_frame, stamp,
-      rclcpp::Duration::from_seconds(timeout_sec));
-    return true;
-  } catch (const tf2::TransformException &) {
-    return false;
   }
 }
 
@@ -509,6 +609,17 @@ void GroundConsistencyLayer::nongroundCloudCallback(
   tf2::fromMsg(tf_stamped.transform, transform);
   const double res = getResolution();
 
+  // Get robot base Z for ceiling filtering
+  double robot_base_z = 0.0;
+  {
+    geometry_msgs::msg::TransformStamped robot_tf;
+    if (lookupTF(tf_buffer_, global_frame_, robot_base_frame_,
+                 msg->header.stamp, tf_timeout_, robot_tf)) {
+      robot_base_z = robot_tf.transform.translation.z;
+    }
+  }
+  const double max_z = robot_base_z + robot_height_;
+
   try {
     sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
     sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
@@ -518,6 +629,9 @@ void GroundConsistencyLayer::nongroundCloudCallback(
 
     for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
       tf2::Vector3 gp = transform(tf2::Vector3(*iter_x, *iter_y, *iter_z));
+
+      // Skip points above robot height — these are ceiling, not obstacles
+      if (gp.z() > max_z) continue;
 
       WorldKey key = worldKey(gp.x(), gp.y(), res);
       auto & cell = cells_[key];
@@ -542,20 +656,22 @@ void GroundConsistencyLayer::updateCosts(
   unsigned int size_x = master_grid.getSizeInCellsX();
   const double res = getResolution();
 
-  // Write pre-computed costs to master grid via raw pointer
-  for (const auto & [key, cell] : cells_) {
-    int32_t xi = unpackX(key);
-    int32_t yi = unpackY(key);
-    double wx = (static_cast<double>(xi) + 0.5) * res;
-    double wy = (static_cast<double>(yi) + 0.5) * res;
-
-    unsigned int mx, my;
-    if (!master_grid.worldToMap(wx, wy, mx, my)) continue;
-    if (static_cast<int>(mx) < min_i || static_cast<int>(mx) >= max_i ||
-        static_cast<int>(my) < min_j || static_cast<int>(my) >= max_j) continue;
-
-    master_array[my * size_x + mx] = cell.computed_cost;
-    cells_updated_this_cycle_++;
+  // Write pre-computed costs to master grid by iterating over master grid cells
+  // and looking up the corresponding world-key cell.  This avoids quantization
+  // mismatch between the global world-key grid (floor(wx/res)) and the rolling-
+  // window master grid ((wx-origin)/res) which can leave gaps as NO_INFORMATION.
+  for (int j = min_j; j < max_j; ++j) {
+    for (int i = min_i; i < max_i; ++i) {
+      double wx, wy;
+      master_grid.mapToWorld(static_cast<unsigned int>(i),
+                             static_cast<unsigned int>(j), wx, wy);
+      WorldKey key = worldKey(wx, wy, res);
+      auto it = cells_.find(key);
+      if (it != cells_.end()) {
+        master_array[j * size_x + i] = it->second.computed_cost;
+        cells_updated_this_cycle_++;
+      }
+    }
   }
 
   // Clear footprint on the master grid (after writing costs so it takes priority)
