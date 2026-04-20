@@ -83,19 +83,19 @@ private:
   // Evidence model
   float ground_inc_{1.0f};
   float nonground_inc_{1.5f};
-  float ground_decay_{0.92f};
-  float nonground_decay_{0.90f};
+  float ground_decay_{0.80f};
+  float nonground_decay_{0.93f};
 
   float nonground_occ_thresh_{2.0f};
   float nonground_prob_thresh_{0.750f};
 
-  double max_score_{1000.0};
+  double max_score_{5000.0};
   bool discretize_costs_{false};
 
   double min_clearance_{0.1};
   double robot_height_{1.2};
-  double max_data_range_{0.0};
-  int ground_neighbor_search_radius_{2};
+  double max_data_range_{50.0};
+  int ground_neighbor_search_radius_{0};
 
   // Footprint clearing
   bool footprint_clearing_enabled_{true};
