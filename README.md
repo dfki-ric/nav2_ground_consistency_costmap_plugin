@@ -29,16 +29,17 @@ Both clouds are transformed into the costmap's global frame via TF2.
 | `nonground_points_topic` | `/nonground_points` | Topic for obstacle point cloud |
 | `ground_inc` | `1.0` | Evidence added per ground point |
 | `nonground_inc` | `1.5` | Evidence added per obstacle point |
-| `ground_decay` | `0.92` | Per-cycle multiplicative decay for ground evidence (0.0-1.0) |
-| `nonground_decay` | `0.90` | Per-cycle multiplicative decay for obstacle evidence (0.0-1.0) |
+| `ground_decay` | `0.80` | Per-cycle multiplicative decay for ground evidence (0.0-1.0) |
+| `nonground_decay` | `0.93` | Per-cycle multiplicative decay for obstacle evidence (0.0-1.0) |
 | `nonground_occ_thresh` | `2.0` | Minimum obstacle score to trigger height classification |
 | `nonground_prob_thresh` | `0.750` | Minimum obstacle probability for lethal/free classification |
-| `max_score` | `1000.0` | Upper clamp for score accumulation |
+| `max_score` | `5000.0` | Upper clamp for score accumulation |
 | `min_clearance` | `0.1` | Max obstacle height (m) considered passable |
 | `robot_height` | `1.2` | Robot height (m) for tunnel detection |
 | `tf_timeout` | `0.1` | TF lookup timeout (seconds) |
 | `footprint_clearing_enabled` | `true` | Clear evidence under the robot footprint polygon |
-| `max_data_range` | `0.0` | Max distance (m) from robot to retain cell data. `0` = disabled (use costmap window only) |
+| `max_data_range` | `50.0` | Max distance (m) from robot to retain cell data. `0` = disabled (use costmap window only) |
+| `ground_neighbor_search_radius` | `0` | Neighbor interpolation radius (m) for gap cells. `0` = disabled (only use Tier 1 local ground) |
 | `enable_kpi_logging` | `false` | Write per-cycle metrics to `/tmp/costmap_kpi_*.csv` |
 | `discretize_costs` | `false` | Output binary costs (LETHAL or FREE only) instead of probabilistic gradients |
 
@@ -68,6 +69,27 @@ obstacle_height = obstacle_max_z - avg_ground_z
 | `step_height > robot_height` | FREE_SPACE | Overhead structure, robot fits underneath |
 | `obstacle_height < min_clearance` | FREE_SPACE | Small obstacle (curbs, low vegetation) |
 | Otherwise | LETHAL_OBSTACLE | Blocking obstacle |
+
+### 3-Tier Ground Reference System
+
+For cells without local ground data (gap cells between ground regions), the layer estimates ground height using a three-tier fallback:
+
+**Tier 1 (Local):** Use cell's own ground height statistics if available.
+
+**Tier 2 (Neighbor Interpolation):** If local data missing, average ground height from neighboring cells within `ground_neighbor_search_radius`. Disabled by default (`ground_neighbor_search_radius: 0`).
+
+**Tier 3 (Conservative Lethal):** If no neighbors found, mark cell as LETHAL to prevent false passages through unmapped gaps.
+
+This avoids brittle assumptions (e.g., robot Z coordinate) while still enabling traversable gap classification.
+
+### Per-Frame Height Tracking
+
+To prevent stray sensor noise from permanently corrupting obstacle height estimates, the layer uses per-frame height buffers:
+
+- During point cloud callback: update frame-local min/max height (`obstacle_min_height_frame`, `obstacle_max_height_frame`)
+- During `updateBounds()`: refresh persistent heights from current frame data, reset frame buffers
+
+Result: cells recover when noisy points disappear, avoiding permanent contamination from single outliers.
 
 ### No-Data Decay Guard
 
@@ -108,16 +130,17 @@ local_costmap:
       nonground_points_topic: "/nonground_points"
       ground_inc: 1.0
       nonground_inc: 1.5
-      ground_decay: 0.92
-      nonground_decay: 0.90
+      ground_decay: 0.80
+      nonground_decay: 0.93
       nonground_occ_thresh: 2.0
       nonground_prob_thresh: 0.750
-      max_score: 1000.0
+      max_score: 5000.0
       min_clearance: 0.1
       robot_height: 1.2
       tf_timeout: 0.1
       footprint_clearing_enabled: true
-      max_data_range: 0.0
+      max_data_range: 50.0
+      ground_neighbor_search_radius: 0
       enable_kpi_logging: false
       discretize_costs: false
     inflation_layer:
@@ -140,6 +163,18 @@ For systems requiring stateless, non-accumulating obstacle detection (e.g., poor
 - geometry_msgs
 
 ## Tuning Guide
+
+### Recent Tuning (v2: Pillar Detection)
+
+The default parameters have been tuned to improve detection of thin vertical obstacles (e.g., pillars) and reduce false positive clearance detection at close range:
+
+- **`ground_decay: 0.80`** (was 0.92): False-positive ground points at obstacle bases fade 2x faster (20% per cycle vs 8%), allowing nonground evidence to dominate over time.
+- **`nonground_decay: 0.93`** (was 0.90): Real obstacle evidence persists longer (7% per cycle fade), improving continuity during partial occlusions.
+- **`max_score: 5000.0`** (was 1000.0): Higher accumulation ceiling allows nonground evidence (scaled at 1.5x) to express dominance over ground evidence (scaled at 1.0x) before both saturate.
+- **`ground_neighbor_search_radius: 0`** (was 2): Disabled neighbor interpolation for gap cells. Conservative approach: cells without local ground data are marked LETHAL rather than interpolated from neighboring ground cells. Reduces false-positive free space in unmapped gaps.
+- **`max_data_range: 50.0`** (was 0.0): Retain evidence only within 50m of robot to bound memory growth and focus on relevant navigation obstacles.
+
+These settings significantly improve reliability for obstacle detection with dense LiDAR (128 vertical samples) at high update rates (20 Hz), especially in complex environments with dense false-positive ground classification from nearby structures.
 
 ### Occupancy Sensitivity
 
