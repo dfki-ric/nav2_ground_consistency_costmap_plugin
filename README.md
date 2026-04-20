@@ -10,6 +10,7 @@ A Nav2 costmap layer that fuses ground and non-ground point clouds into occupanc
 
 ## Quick Start
 
+Minimal config:
 ```yaml
 local_costmap:
   local_costmap:
@@ -18,6 +19,52 @@ local_costmap:
       plugin: "nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer"
       ground_points_topic: "/ground_points"
       nonground_points_topic: "/nonground_points"
+    inflation_layer:
+      plugin: "nav2_costmap_2d::InflationLayer"
+      cost_scaling_factor: 3.0
+      inflation_radius: 1.0
+```
+
+Full config (all parameters):
+```yaml
+local_costmap:
+  local_costmap:
+    plugins: ["ground_consistency_layer", "inflation_layer"]
+    ground_consistency_layer:
+      plugin: "nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer"
+      # Input topics
+      ground_points_topic: "/ground_points"
+      nonground_points_topic: "/nonground_points"
+      tf_timeout: 0.1
+      
+      # Robot dimensions
+      robot_height: 1.2
+      min_clearance: 0.1
+      
+      # Evidence accumulation
+      ground_inc: 1.0
+      nonground_inc: 1.5
+      
+      # Decay rates (per update cycle)
+      ground_decay: 0.80
+      nonground_decay: 0.93
+      
+      # Thresholds
+      nonground_occ_thresh: 2.0
+      nonground_prob_thresh: 0.750
+      max_score: 5000.0
+      
+      # Performance & memory
+      max_data_range: 50.0
+      discretize_costs: false
+      footprint_clearing_enabled: true
+      
+      # Gap interpolation
+      ground_neighbor_search_radius: 0
+      
+      # Logging
+      enable_kpi_logging: false
+    
     inflation_layer:
       plugin: "nav2_costmap_2d::InflationLayer"
       cost_scaling_factor: 3.0
@@ -81,11 +128,9 @@ local_costmap:
 **Dense lidar (many false-positive ground points at obstacle base)**:
 - Lower `ground_decay` (0.70-0.80) to suppress stale false ground
 - Raise `nonground_decay` (0.93-0.96) to let real obstacles accumulate
-- Increase `max_score` (6000-10000) for headroom before saturation
 
 **Sparse lidar (few ground points, many gaps)**:
 - Increase `ground_neighbor_search_radius` (e.g., 3-5 cells) to interpolate gap heights
-- Raise `max_score` to stabilize sparse evidence accumulation
 
 **Memory pressure (many cells, large environment)**:
 - Lower `max_data_range` (e.g., 30m instead of 50m)
