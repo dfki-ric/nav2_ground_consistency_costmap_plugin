@@ -272,18 +272,6 @@ void GroundConsistencyLayer::updateBounds(
   size_t total_ground_cells = 0;
   size_t total_nonground_cells = 0;
 
-  // Cache robot Z for tier-3 fallback (once per cycle)
-  double cached_robot_z = 0.0;
-  bool have_robot_z = false;
-  {
-    geometry_msgs::msg::TransformStamped robot_tf;
-    if (lookupTF(tf_buffer_, global_frame_, robot_base_frame_,
-                 rclcpp::Time(0), tf_timeout_, robot_tf)) {
-      cached_robot_z = robot_tf.transform.translation.z;
-      have_robot_z = true;
-    }
-  }
-
   for (auto it = cells_.begin(); it != cells_.end(); ) {
     auto & cell = it->second;
     int32_t xi = unpackX(it->first);
@@ -398,22 +386,15 @@ void GroundConsistencyLayer::updateBounds(
         }
       }
 
-      // Tier 3: Robot Z fallback
-      if (!ground_found && have_robot_z) {
-        ground_avg = cached_robot_z;
-        ground_found = true;
-        tier_used = 3;
-      }
-
       // DEBUG: Log for gap cells with high obstacle evidence
       auto node = node_.lock();
       if (node && cell.ground_height_count == 0u) {
-        const char* tier_names[] = {"NONE", "T1", "T2", "T3"};
+        const char* tier_names[] = {"NONE", "T1", "T2"};
         RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
-          "GAP_CELL[%d,%d]: tier=%s found=%d obs_min=%.2f obs_max=%.2f ground_avg=%.2f robot_z=%.2f robot_h=%.2f step_h=%.2f",
+          "GAP_CELL[%d,%d]: tier=%s found=%d obs_min=%.2f obs_max=%.2f ground_avg=%.2f robot_h=%.2f step_h=%.2f",
           xi, yi, tier_names[tier_used], ground_found,
           cell.obstacle_min_height, cell.obstacle_max_height, ground_avg,
-          cached_robot_z, robot_height_,
+          robot_height_,
           ground_found ? (cell.obstacle_min_height - ground_avg) : -999.0);
       }
 
