@@ -114,6 +114,8 @@ private:
     double ground_height_sum{0.0};
     double obstacle_min_height{std::numeric_limits<double>::max()};
     double obstacle_max_height{std::numeric_limits<double>::lowest()};
+    double obstacle_min_height_frame{std::numeric_limits<double>::max()};
+    double obstacle_max_height_frame{std::numeric_limits<double>::lowest()};
     uint32_t ground_count_frame{0};
     uint32_t nonground_count_frame{0};
     uint8_t computed_cost{0};

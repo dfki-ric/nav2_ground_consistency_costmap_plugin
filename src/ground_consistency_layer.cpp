@@ -320,6 +320,11 @@ void GroundConsistencyLayer::updateBounds(
       double new_score = cell.nonground_count_frame * nonground_inc_;
       cell.nonground_score = static_cast<float>(
         std::min<double>(max_score_, cell.nonground_score + new_score));
+      // Refresh persistent heights with current frame observations
+      cell.obstacle_min_height = cell.obstacle_min_height_frame;
+      cell.obstacle_max_height = cell.obstacle_max_height_frame;
+      cell.obstacle_min_height_frame = std::numeric_limits<double>::max();
+      cell.obstacle_max_height_frame = std::numeric_limits<double>::lowest();
       cell.nonground_count_frame = 0;
     }
 
@@ -609,17 +614,6 @@ void GroundConsistencyLayer::nongroundCloudCallback(
   tf2::fromMsg(tf_stamped.transform, transform);
   const double res = getResolution();
 
-  // Get robot base Z for ceiling filtering
-  double robot_base_z = 0.0;
-  {
-    geometry_msgs::msg::TransformStamped robot_tf;
-    if (lookupTF(tf_buffer_, global_frame_, robot_base_frame_,
-                 msg->header.stamp, tf_timeout_, robot_tf)) {
-      robot_base_z = robot_tf.transform.translation.z;
-    }
-  }
-  const double max_z = robot_base_z + robot_height_;
-
   try {
     sensor_msgs::PointCloud2ConstIterator<float> iter_x(*msg, "x");
     sensor_msgs::PointCloud2ConstIterator<float> iter_y(*msg, "y");
@@ -630,14 +624,11 @@ void GroundConsistencyLayer::nongroundCloudCallback(
     for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
       tf2::Vector3 gp = transform(tf2::Vector3(*iter_x, *iter_y, *iter_z));
 
-      // Skip points above robot height — these are ceiling, not obstacles
-      if (gp.z() > max_z) continue;
-
       WorldKey key = worldKey(gp.x(), gp.y(), res);
       auto & cell = cells_[key];
       cell.nonground_count_frame += 1u;
-      cell.obstacle_min_height = std::min(cell.obstacle_min_height, gp.z());
-      cell.obstacle_max_height = std::max(cell.obstacle_max_height, gp.z());
+      cell.obstacle_min_height_frame = std::min(cell.obstacle_min_height_frame, gp.z());
+      cell.obstacle_max_height_frame = std::max(cell.obstacle_max_height_frame, gp.z());
     }
     have_new_data_ = true;
   } catch (const std::exception & e) {
