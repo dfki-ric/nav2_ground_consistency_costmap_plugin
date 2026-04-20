@@ -74,7 +74,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
   declareParameter("max_data_range", rclcpp::ParameterValue(50.0));
   declareParameter("discretize_costs", rclcpp::ParameterValue(false));
-  declareParameter("ground_neighbor_search_radius", rclcpp::ParameterValue(0));
+  declareParameter("ground_neighbor_search_cells", rclcpp::ParameterValue(0));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -100,7 +100,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".enable_kpi_logging", kpi_enabled_);
   node->get_parameter(name_ + ".max_data_range", max_data_range_);
   node->get_parameter(name_ + ".discretize_costs", discretize_costs_);
-  node->get_parameter(name_ + ".ground_neighbor_search_radius", ground_neighbor_search_radius_);
+  node->get_parameter(name_ + ".ground_neighbor_search_cells", ground_neighbor_search_cells_);
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
@@ -360,7 +360,7 @@ void GroundConsistencyLayer::updateBounds(
       if (!ground_found) {
         double sum_z = 0.0;
         uint32_t count = 0;
-        const int r = ground_neighbor_search_radius_;
+        const int r = ground_neighbor_search_cells_;
         for (int dx = -r; dx <= r; ++dx) {
           for (int dy = -r; dy <= r; ++dy) {
             if (dx == 0 && dy == 0) continue;

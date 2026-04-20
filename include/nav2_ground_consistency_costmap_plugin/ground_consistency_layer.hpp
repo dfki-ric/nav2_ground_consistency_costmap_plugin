@@ -95,7 +95,7 @@ private:
   double min_clearance_{0.1};
   double robot_height_{1.2};
   double max_data_range_{50.0};
-  int ground_neighbor_search_radius_{0};
+  int ground_neighbor_search_cells_{0};
 
   // Footprint clearing
   bool footprint_clearing_enabled_{true};

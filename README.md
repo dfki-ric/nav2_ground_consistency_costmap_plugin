@@ -60,7 +60,7 @@ local_costmap:
       footprint_clearing_enabled: true
       
       # Gap interpolation
-      ground_neighbor_search_radius: 0
+      ground_neighbor_search_cells: 0
       
       # Logging
       enable_kpi_logging: false
@@ -106,7 +106,7 @@ local_costmap:
 | `enable_kpi_logging` | `false` | bool | Write cycle metrics to `/tmp/costmap_kpi_*.csv` |
 | `max_data_range` | `50.0` | double | Retain cell data only within this distance from robot (0=disabled) |
 | `discretize_costs` | `false` | bool | Output only binary costs (LETHAL or FREE, no gradients) |
-| `ground_neighbor_search_radius` | `0` | int | Search radius for neighbor ground height interpolation. 0=disabled
+| `ground_neighbor_search_cells` | `0` | int | Search radius (cell count) for neighbor ground height interpolation. 0=disabled
 
 ## Tuning
 
@@ -130,7 +130,7 @@ local_costmap:
 - Raise `nonground_decay` (0.93-0.96) to let real obstacles accumulate
 
 **Sparse lidar (few ground points, many gaps)**:
-- Increase `ground_neighbor_search_radius` (e.g., 3-5 cells) to interpolate gap heights
+- Increase `ground_neighbor_search_cells` (e.g., 3-5 cells) to interpolate gap heights
 
 **Memory pressure (many cells, large environment)**:
 - Lower `max_data_range` (e.g., 30m instead of 50m)
