@@ -386,17 +386,7 @@ void GroundConsistencyLayer::updateBounds(
         }
       }
 
-      // DEBUG: Log for gap cells with high obstacle evidence
-      auto node = node_.lock();
-      if (node && cell.ground_height_count == 0u) {
-        const char* tier_names[] = {"NONE", "T1", "T2"};
-        RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
-          "GAP_CELL[%d,%d]: tier=%s found=%d obs_min=%.2f obs_max=%.2f ground_avg=%.2f robot_h=%.2f step_h=%.2f",
-          xi, yi, tier_names[tier_used], ground_found,
-          cell.obstacle_min_height, cell.obstacle_max_height, ground_avg,
-          robot_height_,
-          ground_found ? (cell.obstacle_min_height - ground_avg) : -999.0);
-      }
+
 
       // Apply height filtering or conservative fallback
       if (ground_found) {
@@ -405,32 +395,12 @@ void GroundConsistencyLayer::updateBounds(
 
         if (step_height > robot_height_ || obstacle_height < min_clearance_) {
           make_free = true;
-          
-          // DEBUG: Check if FREE cells are being set for Tier 1 cells (with ground data)
-          if (cell.ground_height_count > 0u) {
-            if (node) {
-              RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
-                "TIER1_FREE: cell[%d,%d] obs_min=%.2f ground_avg=%.2f step_h=%.2f",
-                xi, yi, cell.obstacle_min_height, ground_avg, step_height);
-            }
-          }
         } else {
           make_lethal = true;
-          if (node) {
-            RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
-              "LETHAL_HEIGHT: cell[%d,%d] obs_min=%.2f obs_max=%.2f ground_avg=%.2f step_h=%.2f obs_h=%.2f robot_h=%.2f min_cl=%.2f g_count=%u",
-              xi, yi, cell.obstacle_min_height, cell.obstacle_max_height, ground_avg,
-              step_height, obstacle_height, robot_height_, min_clearance_, cell.ground_height_count);
-          }
         }
       } else {
         // All tiers failed: conservative LETHAL
         make_lethal = true;
-        if (node) {
-          RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
-            "LETHAL_NO_GROUND: cell[%d,%d] obs_min=%.2f obs_max=%.2f",
-            xi, yi, cell.obstacle_min_height, cell.obstacle_max_height);
-        }
       }
     }
 
@@ -448,16 +418,6 @@ void GroundConsistencyLayer::updateBounds(
     }
 
     cell.computed_cost = cost;
-
-    // DEBUG: Check if FREE cells are actually being set for gap cells
-    if (cell.ground_height_count == 0u && make_free) {
-      auto node = node_.lock();
-      if (node) {
-        RCLCPP_INFO_THROTTLE(node->get_logger(), *node->get_clock(), 3000,
-          "SETTING_FREE: cell[%d,%d] cost=%d (FREE_SPACE=%d LETHAL=%d)",
-          xi, yi, (int)cost, (int)nav2_costmap_2d::FREE_SPACE, (int)nav2_costmap_2d::LETHAL_OBSTACLE);
-      }
-    }
 
     // Update bounds
     local_min_x = std::min(local_min_x, wx);
