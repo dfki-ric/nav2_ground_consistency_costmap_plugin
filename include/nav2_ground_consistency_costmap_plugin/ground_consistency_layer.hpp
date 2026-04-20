@@ -96,7 +96,6 @@ private:
   double robot_height_{1.2};
   double max_data_range_{0.0};
   int ground_neighbor_search_radius_{2};
-  std::string robot_base_frame_;
 
   // Footprint clearing
   bool footprint_clearing_enabled_{true};

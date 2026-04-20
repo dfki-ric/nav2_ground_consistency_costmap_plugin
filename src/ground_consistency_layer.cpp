@@ -104,11 +104,6 @@ void GroundConsistencyLayer::onInitialize()
 
   global_frame_ = layered_costmap_->getGlobalFrameID();
 
-  // Read robot_base_frame from costmap config
-  std::string robot_base_frame_param;
-  node->get_parameter("robot_base_frame", robot_base_frame_param);
-  robot_base_frame_ = robot_base_frame_param.empty() ? "base_link" : robot_base_frame_param;
-
   tf_buffer_ = std::make_shared<tf2_ros::Buffer>(node->get_clock());
   tf_listener_ = std::make_shared<tf2_ros::TransformListener>(*tf_buffer_);
 
@@ -354,13 +349,11 @@ void GroundConsistencyLayer::updateBounds(
     if (ng >= nonground_occ_thresh_ && p_occ > nonground_prob_thresh_) {
       double ground_avg = 0.0;
       bool ground_found = false;
-      int tier_used = 0;  // 0=none, 1=local, 2=neighbor, 3=robot_z
 
       // Tier 1: Local ground data
       if (cell.ground_height_count > 0u) {
         ground_avg = cell.ground_height_sum / static_cast<double>(cell.ground_height_count);
         ground_found = true;
-        tier_used = 1;
       }
 
       // Tier 2: Neighbor interpolation
@@ -382,7 +375,6 @@ void GroundConsistencyLayer::updateBounds(
         if (count > 0) {
           ground_avg = sum_z / count;
           ground_found = true;
-          tier_used = 2;
         }
       }
 
