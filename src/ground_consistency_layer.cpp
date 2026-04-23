@@ -73,6 +73,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("footprint_clearing_enabled", rclcpp::ParameterValue(true));
   declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
   declareParameter("max_data_range", rclcpp::ParameterValue(50.0));
+  declareParameter("maximum_height_filter", rclcpp::ParameterValue(std::numeric_limits<double>::max()));
   declareParameter("discretize_costs", rclcpp::ParameterValue(false));
   declareParameter("ground_neighbor_search_cells", rclcpp::ParameterValue(0));
 
@@ -99,6 +100,7 @@ void GroundConsistencyLayer::onInitialize()
   node->get_parameter(name_ + ".footprint_clearing_enabled", footprint_clearing_enabled_);
   node->get_parameter(name_ + ".enable_kpi_logging", kpi_enabled_);
   node->get_parameter(name_ + ".max_data_range", max_data_range_);
+  node->get_parameter(name_ + ".maximum_height_filter", maximum_height_filter_);
   node->get_parameter(name_ + ".discretize_costs", discretize_costs_);
   node->get_parameter(name_ + ".ground_neighbor_search_cells", ground_neighbor_search_cells_);
 
@@ -111,9 +113,10 @@ void GroundConsistencyLayer::onInitialize()
 
   RCLCPP_INFO(node->get_logger(), 
     "GroundConsistencyLayer initialized. global_frame=%s, "
-    "ground_topic=%s, nonground_topic=%s, enable_kpi=%s",
+    "ground_topic=%s, nonground_topic=%s, enable_kpi=%s, "
+    "maximum_height_filter=%.2f m",
     global_frame_.c_str(), ground_topic_.c_str(), nonground_topic_.c_str(),
-    kpi_enabled_ ? "true" : "false");
+    kpi_enabled_ ? "true" : "false", maximum_height_filter_);
 
   // Initialize KPI tracking
   if (kpi_enabled_) {
@@ -556,6 +559,11 @@ void GroundConsistencyLayer::nongroundCloudCallback(
 
     for (; iter_x != iter_x.end(); ++iter_x, ++iter_y, ++iter_z) {
       tf2::Vector3 gp = transform(tf2::Vector3(*iter_x, *iter_y, *iter_z));
+
+      // Apply maximum height filter: reject nonground points beyond the threshold
+      if (gp.z() > maximum_height_filter_) {
+        continue;
+      }
 
       WorldKey key = worldKey(gp.x(), gp.y(), res);
       auto & cell = cells_[key];

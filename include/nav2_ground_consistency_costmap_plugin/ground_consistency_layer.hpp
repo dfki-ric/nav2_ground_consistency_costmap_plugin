@@ -95,6 +95,7 @@ private:
   double min_clearance_{0.1};
   double robot_height_{1.2};
   double max_data_range_{50.0};
+  double maximum_height_filter_{std::numeric_limits<double>::max()};
   int ground_neighbor_search_cells_{0};
 
   // Footprint clearing
