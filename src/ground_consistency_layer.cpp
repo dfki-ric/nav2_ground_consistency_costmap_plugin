@@ -561,6 +561,8 @@ void GroundConsistencyLayer::nongroundCloudCallback(
       tf2::Vector3 gp = transform(tf2::Vector3(*iter_x, *iter_y, *iter_z));
 
       // Apply maximum height filter: reject nonground points beyond the threshold
+      // Filter operates in the source frame (typically base_link/lidar frame)
+      // before transformation to global frame. Useful for filtering sky/ceiling points.
       if (gp.z() > maximum_height_filter_) {
         continue;
       }
