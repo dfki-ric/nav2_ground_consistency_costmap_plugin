@@ -5,7 +5,7 @@
   <version>1.0.0</version>
   <description>Ground consistency costmap layer using ground/non-ground point clouds.</description>
 
-  <maintainer email="haider_lodhi@hotmail.com">dockeruser</maintainer>
+  <maintainer email="haider_khan.lodhi@dfki.de">DFKI RIC</maintainer>
   <license>BSD 3-Clause</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
