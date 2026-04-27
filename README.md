@@ -40,6 +40,7 @@ local_costmap:
       # Robot dimensions
       robot_height: 1.2
       min_clearance: 0.1
+      maximum_height_filter: 5.0
       
       # Evidence accumulation
       ground_inc: 1.0
@@ -102,6 +103,7 @@ local_costmap:
 | `max_score` | `5000.0` | double | Upper clamp for accumulated scores |
 | `min_clearance` | `0.1` | double | Ignore obstacles with height < min_clearance (m) |
 | `robot_height` | `1.2` | double | Robot height; taller obstacles classified as FREE (m) |
+| `maximum_height_filter` | `inf` | double | Filter out points above this height; useful for ignoring ceilings/overhangs (m, 0=disabled) |
 | `footprint_clearing_enabled` | `true` | bool | Clear evidence under robot footprint polygon each cycle |
 | `enable_kpi_logging` | `false` | bool | Write cycle metrics to `/tmp/costmap_kpi_*.csv` |
 | `max_data_range` | `50.0` | double | Retain cell data only within this distance from robot (0=disabled) |
@@ -109,6 +111,11 @@ local_costmap:
 | `ground_neighbor_search_cells` | `0` | int | Search radius (cell count) for neighbor ground height interpolation. 0=disabled
 
 ## Tuning
+
+**Height Filtering (Overhead Obstacles):**
+- Set `maximum_height_filter` to prevent ceiling/overhead structures from blocking navigation
+- Example: 2.1 m doorway with 0.92 m tall robot → set `maximum_height_filter: 2.0m` to ignore everything above reachable height
+- Useful for indoor navigation where lidar may detect ceilings wrongly as obstacles
 
 **Favor detecting obstacles more carefully** (current defaults):
 - Low ground decay (0.80) → false-positive ground fades fast
