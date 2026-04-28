@@ -86,11 +86,11 @@ private:
   float ground_decay_{0.80f};
   float nonground_decay_{0.93f};
 
-  float nonground_occ_thresh_{2.0f};
+  float nonground_occ_thresh_{6.0f};
   float nonground_prob_thresh_{0.750f};
 
   double max_score_{5000.0};
-  bool discretize_costs_{false};
+  bool discretize_costs_{true};
 
   double min_clearance_{0.1};
   double robot_height_{1.2};

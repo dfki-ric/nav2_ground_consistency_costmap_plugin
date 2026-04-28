@@ -65,7 +65,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("nonground_inc", rclcpp::ParameterValue(1.5));
   declareParameter("ground_decay", rclcpp::ParameterValue(0.80));
   declareParameter("nonground_decay", rclcpp::ParameterValue(0.93));
-  declareParameter("nonground_occ_thresh", rclcpp::ParameterValue(2.0));
+  declareParameter("nonground_occ_thresh", rclcpp::ParameterValue(6.0));
   declareParameter("nonground_prob_thresh", rclcpp::ParameterValue(0.750));
   declareParameter("max_score", rclcpp::ParameterValue(5000.0));
   declareParameter("min_clearance", rclcpp::ParameterValue(0.1));
@@ -74,7 +74,7 @@ void GroundConsistencyLayer::onInitialize()
   declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
   declareParameter("max_data_range", rclcpp::ParameterValue(50.0));
   declareParameter("maximum_height_filter", rclcpp::ParameterValue(std::numeric_limits<double>::max()));
-  declareParameter("discretize_costs", rclcpp::ParameterValue(false));
+  declareParameter("discretize_costs", rclcpp::ParameterValue(true));
   declareParameter("ground_neighbor_search_cells", rclcpp::ParameterValue(0));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
