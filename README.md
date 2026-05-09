@@ -1,31 +1,85 @@
-# nav2_ground_consistency_costmap_plugin
+<div align="center">
+  <h1>Nav2 Ground Consistency Costmap Plugin</h1>
+  <a href="https://github.com/dfki-ric/ground_segmentation">Core Library</a>
+  <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
+  <a href="https://github.com/dfki-ric/ground_segmentation_ros2">ROS 2 Wrapper</a>
+  <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
+  <a href="https://docs.nav2.org/plugins/index.html">Nav2 Plugin Docs</a>
+  <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
+  <a href="https://doi.org/10.1109/ICRCV67407.2025.11349133">Paper</a>
+  <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
+  <a href="https://docs.nav2.org/tutorials/index.html">Nav2 Tutorials</a>
+</div>
+
+---
 
 ![ground_consistency_layer](images/ground_consistency_layer.gif)
+
+[Arter Excavator](https://robotik.dfki-bremen.de/en/research/robot-systems/arter) at the [Robotics Innovation Center, Bremen, Germany](https://robotik.dfki-bremen.de/en/startpage)
+
+## Demo Scenarios
+
+Let us see the performance on real-world data. We used [kiss-icp](https://github.com/prbonn/kiss-icp) as source of odometry.
+
+[BotanicGarden dataset](https://github.com/robot-pesg/BotanicGarden)
+<p align="center">
+  <img src="images/botanic_garden.gif" alt="Botanic garden scenario" width="100%" />
+</p>
+
+[Citrus-Farm dataset](https://github.com/UCR-Robotics/Citrus-Farm-Dataset)
+
+<p align="center">
+  <img src="images/citrus_farm.gif" alt="Citrus farm scenario" width="100%" />
+</p>
 
 ## Overview
 
 A Nav2 costmap layer that fuses ground and non-ground point clouds into occupancy estimates. It classifies obstacles using height-based filtering: overhead structures (tunnels) appear free, small objects (curbs) can be ignored, and actual blocking obstacles trigger avoidance.
 
-**Requirements:** Ground segmentation output (two PointCloud2 topics). Use [DFKI's ground_segmentation_ros2](https://github.com/dfki-ric/ground_segmentation_ros2) for LiDAR ground plane estimation.
+**Requirements:** Ground segmentation output (two PointCloud2 topics). Use [DFKI's ground_segmentation_ros2](https://github.com/dfki-ric/ground_segmentation_ros2) for LiDAR based ground segmentation.
 
-## Quick Start
+## Ground Consistency Layer
 
-Minimal config:
-```yaml
-local_costmap:
-  local_costmap:
-    plugins: ["ground_consistency_layer", "inflation_layer"]
-    ground_consistency_layer:
-      plugin: "nav2_ground_consistency_costmap_plugin::GroundConsistencyLayer"
-      ground_points_topic: "/ground_points"
-      nonground_points_topic: "/nonground_points"
-    inflation_layer:
-      plugin: "nav2_costmap_2d::InflationLayer"
-      cost_scaling_factor: 3.0
-      inflation_radius: 1.0
-```
+Ground Consistency is a costmap layer that leverages ground segmentation to create more reliable occupancy estimates for navigation in challenging outdoor environments. While it can be used with any ground segmentation algorithm, we recommend using GSeg3D for which this plugin was originally developed to integrate with.
 
-Full config (all parameters):
+**Key Features:**
+
+- **Evidence-Based Probabilistic Approach**: Maintains accumulated evidence of ground and obstacle points across multiple sensor observations, rather than making binary decisions on individual measurements
+- **Evidence Competition**: Ground and obstacle points compete to determine the true occupancy status of each costmap cell, reducing false positives and false negatives
+- **Height-Based Classification**: Distinguishes between actual obstacles and terrain variations (e.g., slopes, small bumps) by evaluating obstacle height relative to local ground level
+- **Temporal Stability**: Evidence accumulates and decays over time, creating smooth transitions between free and occupied states while maintaining responsiveness to environmental changes
+- **Noise Resilience**: Protects against isolated sensor noise by requiring sustained evidence before marking a cell as occupied
+
+### 1. Evidence Accumulation and Competition System
+
+Each grid cell in the layer maintains two types of evidence: ground and obstacle. As new sensor data arrives, these scores are updated and compared to estimate how likely the cell is occupied. Evidence weights for ground and obstacle points can be adjusted independently (e.g., obstacle evidence may be weighted more heavily than ground evidence) to create a safety bias.
+
+A cell is marked as an obstacle only when there is both:
+
+- enough evidence of obstacle points, and
+- high confidence that the evidence of obstacle is stronger than the evidence of ground.
+
+This approach prevents isolated sensor noise from affecting navigation. For example, a single false positive obstacle point will not mark a cell as occupied if there is strong ground evidence.
+
+### 2. Height-Based Occupancy Classification
+
+Not all detected obstacles actually block the robot. The layer evaluates obstacle height relative to the local ground height. Based on the robot's height:
+
+- Very high objects are treated as overhead (safe to pass under)
+- Very low objects are treated as terrain variation
+- Only objects within the robot's collision range are considered blocking
+
+At times, the terrain is such that no local ground height can be reliably determined. In this case, the layer can be configured to use neighboring cells to estimate local ground height (see the `ground_neighbor_search_cells` parameter), or treat all such obstacles without ground below them as blocking. For example, if the robot is navigating through a tunnel and the ground segmentation fails to detect any ground points, then as a backup plan, a `maximum_height_filter` can be applied to incoming obstacle points. This allows the robot to navigate through tunnels and under bridges without being blocked by misclassified ground points.
+
+### 3. Temporal Stability Through Evidence Decay
+
+Evidence is decayed over time to allow the costmap to adapt to changing environments. Cells transition gradually between free and occupied states as evidence builds or fades. The rate of decay can be tuned separately for ground and obstacle evidence, creating temporal hysteresis, which allows for more stable and responsive terrain adaptation (faster ground decay) while maintaining stable obstacle marking (slower obstacle decay).
+
+## Configuration
+It is recommended to use the layer in the local costmap
+since it relies on real-time sensor data and is designed for short-term occupancy estimation. For safety, use the layer
+together with the inflation layer to create a buffer around detected obstacles.
+
 ```yaml
 local_costmap:
   local_costmap:
@@ -114,7 +168,6 @@ local_costmap:
 
 **Height Filtering (Overhead Obstacles):**
 - Set `maximum_height_filter` to prevent ceiling/overhead structures from blocking navigation
-- Example: 2.1 m doorway with 0.92 m tall robot → set `maximum_height_filter: 2.0m` to ignore everything above reachable height
 - Useful for indoor navigation where lidar may detect ceilings wrongly as obstacles
 
 **Favor detecting obstacles more carefully** (current defaults):
@@ -153,11 +206,6 @@ local_costmap:
 colcon build --packages-select nav2_ground_consistency_costmap_plugin
 source install/setup.bash
 ```
-
-## Topics
-
-- **Input:** `/ground_points` and `/nonground_points` (PointCloud2)
-- **Output:** Costmap layer
 
 ## License
 
