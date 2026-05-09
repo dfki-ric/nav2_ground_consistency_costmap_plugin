@@ -1,14 +1,12 @@
 <div align="center">
   <h1>Nav2 Ground Consistency Costmap Plugin</h1>
-  <a href="https://github.com/dfki-ric/ground_segmentation">Core Library</a>
+  <a href="https://docs.nav2.org/tutorials/index.html">Nav2 Tutorial (Coming Soon)</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-  <a href="https://github.com/dfki-ric/ground_segmentation_ros2">ROS 2 Wrapper</a>
+  <a href="https://github.com/dfki-ric/ground_segmentation">GSeg3D Library</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-  <a href="https://docs.nav2.org/plugins/index.html">Nav2 Plugin Docs</a>
+  <a href="https://github.com/dfki-ric/ground_segmentation_ros2">GSeg3D ROS 2 Wrapper</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-  <a href="https://doi.org/10.1109/ICRCV67407.2025.11349133">Paper</a>
-  <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
-  <a href="https://docs.nav2.org/tutorials/index.html">Nav2 Tutorials</a>
+  <a href="https://doi.org/10.1109/ICRCV67407.2025.11349133">GSeg3D Paper</a>
 </div>
 
 ---
