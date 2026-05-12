@@ -1,13 +1,10 @@
-// Copyright 2025 Your Organization
-// Licensed under the Apache License, Version 2.0
-
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "rclcpp/rclcpp.hpp"
-#include "rclcpp_lifecycle/lifecycle_node.hpp"
+#include "nav2_ros_common/lifecycle_node.hpp"
 #include "nav2_costmap_2d/costmap_2d.hpp"
 #include "nav2_costmap_2d/layered_costmap.hpp"
 #include "nav2_costmap_2d/cost_values.hpp"
@@ -36,48 +33,48 @@ public:
 RosFixture g_ros_fixture;
 
 // Test node using standard lifecycle node
-class TestNode : public rclcpp_lifecycle::LifecycleNode
+class TestNode : public nav2::LifecycleNode
 {
 public:
   explicit TestNode(const std::string & name)
-  : rclcpp_lifecycle::LifecycleNode(name)
+  : nav2::LifecycleNode(name)
   {
   }
 
-  rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn on_configure(
+  nav2::LifecycleNode::CallbackReturn on_configure(
     const rclcpp_lifecycle::State &)
   {
-    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    return nav2::LifecycleNode::CallbackReturn::SUCCESS;
   }
 
-  rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn on_activate(
+  nav2::LifecycleNode::CallbackReturn on_activate(
     const rclcpp_lifecycle::State &)
   {
-    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    return nav2::LifecycleNode::CallbackReturn::SUCCESS;
   }
 
-  rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn on_deactivate(
+  nav2::LifecycleNode::CallbackReturn on_deactivate(
     const rclcpp_lifecycle::State &)
   {
-    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    return nav2::LifecycleNode::CallbackReturn::SUCCESS;
   }
 
-  rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn on_cleanup(
+  nav2::LifecycleNode::CallbackReturn on_cleanup(
     const rclcpp_lifecycle::State &)
   {
-    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    return nav2::LifecycleNode::CallbackReturn::SUCCESS;
   }
 
-  rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn onShutdown(
+  nav2::LifecycleNode::CallbackReturn onShutdown(
     const rclcpp_lifecycle::State &)
   {
-    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    return nav2::LifecycleNode::CallbackReturn::SUCCESS;
   }
 
-  rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn onError(
+  nav2::LifecycleNode::CallbackReturn onError(
     const rclcpp_lifecycle::State &)
   {
-    return rclcpp_lifecycle::node_interfaces::LifecycleNodeInterface::CallbackReturn::SUCCESS;
+    return nav2::LifecycleNode::CallbackReturn::SUCCESS;
   }
 };
 
@@ -106,9 +103,12 @@ public:
                              rclcpp::ParameterValue(ground_topic));
     node_->declare_parameter("ground_consistency.nonground_points_topic",
                              rclcpp::ParameterValue(nonground_topic));
-
-    layer_->initialize(&layers_, "ground_consistency", tf_buffer_.get(),
-                       rclcpp_lifecycle::LifecycleNode::WeakPtr(node_), nullptr);
+    layer_->initialize(
+          &layers_, 
+          "ground_consistency", 
+          tf_buffer_.get(),
+          nav2::LifecycleNode::WeakPtr(node_),
+          nullptr);
     layers_.addPlugin(std::shared_ptr<nav2_costmap_2d::Layer>(layer_));
   }
 

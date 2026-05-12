@@ -7,8 +7,8 @@
 
 #include "pluginlib/class_list_macros.hpp"
 #include "sensor_msgs/point_cloud2_iterator.hpp"
-#include "tf2/convert.h"
-#include "tf2/LinearMath/Transform.h"
+#include "tf2/convert.hpp"
+#include "tf2/LinearMath/Transform.hpp"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.hpp"
 
 #include "nav2_costmap_2d/cost_values.hpp"
@@ -58,24 +58,24 @@ void GroundConsistencyLayer::onInitialize()
   }
 
   // Parameters
-  declareParameter("ground_points_topic", rclcpp::ParameterValue(std::string("/ground_points")));
-  declareParameter("nonground_points_topic", rclcpp::ParameterValue(std::string("/nonground_points")));
-  declareParameter("tf_timeout", rclcpp::ParameterValue(0.1));
-  declareParameter("ground_inc", rclcpp::ParameterValue(1.0));
-  declareParameter("nonground_inc", rclcpp::ParameterValue(1.5));
-  declareParameter("ground_decay", rclcpp::ParameterValue(0.80));
-  declareParameter("nonground_decay", rclcpp::ParameterValue(0.93));
-  declareParameter("nonground_occ_thresh", rclcpp::ParameterValue(6.0));
-  declareParameter("nonground_prob_thresh", rclcpp::ParameterValue(0.750));
-  declareParameter("max_score", rclcpp::ParameterValue(5000.0));
-  declareParameter("min_clearance", rclcpp::ParameterValue(0.1));
-  declareParameter("robot_height", rclcpp::ParameterValue(1.2));
-  declareParameter("footprint_clearing_enabled", rclcpp::ParameterValue(true));
-  declareParameter("enable_kpi_logging", rclcpp::ParameterValue(false));
-  declareParameter("max_data_range", rclcpp::ParameterValue(50.0));
-  declareParameter("maximum_height_filter", rclcpp::ParameterValue(std::numeric_limits<double>::max()));
-  declareParameter("discretize_costs", rclcpp::ParameterValue(true));
-  declareParameter("ground_neighbor_search_cells", rclcpp::ParameterValue(0));
+  node->declare_parameter(name_ + ".ground_points_topic", rclcpp::ParameterValue(std::string("/ground_points")));
+  node->declare_parameter(name_ + ".nonground_points_topic", rclcpp::ParameterValue(std::string("/nonground_points")));
+  node->declare_parameter(name_ + ".tf_timeout", rclcpp::ParameterValue(0.1));
+  node->declare_parameter(name_ + ".ground_inc", rclcpp::ParameterValue(1.0));
+  node->declare_parameter(name_ + ".nonground_inc", rclcpp::ParameterValue(1.5));
+  node->declare_parameter(name_ + ".ground_decay", rclcpp::ParameterValue(0.80));
+  node->declare_parameter(name_ + ".nonground_decay", rclcpp::ParameterValue(0.93));
+  node->declare_parameter(name_ + ".nonground_occ_thresh", rclcpp::ParameterValue(6.0));
+  node->declare_parameter(name_ + ".nonground_prob_thresh", rclcpp::ParameterValue(0.750));
+  node->declare_parameter(name_ + ".max_score", rclcpp::ParameterValue(5000.0));
+  node->declare_parameter(name_ + ".min_clearance", rclcpp::ParameterValue(0.1));
+  node->declare_parameter(name_ + ".robot_height", rclcpp::ParameterValue(1.2));
+  node->declare_parameter(name_ + ".footprint_clearing_enabled", rclcpp::ParameterValue(true));
+  node->declare_parameter(name_ + ".enable_kpi_logging", rclcpp::ParameterValue(false));
+  node->declare_parameter(name_ + ".max_data_range", rclcpp::ParameterValue(50.0));
+  node->declare_parameter(name_ + ".maximum_height_filter", rclcpp::ParameterValue(std::numeric_limits<double>::max()));
+  node->declare_parameter(name_ + ".discretize_costs", rclcpp::ParameterValue(true));
+  node->declare_parameter(name_ + ".ground_neighbor_search_cells", rclcpp::ParameterValue(0));
 
   node->get_parameter(name_ + ".ground_points_topic", ground_topic_);
   node->get_parameter(name_ + ".nonground_points_topic", nonground_topic_);
@@ -140,13 +140,16 @@ void GroundConsistencyLayer::activate()
   }
 
   auto qos = rclcpp::SensorDataQoS();
+
   ground_sub_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
-    ground_topic_, qos,
-    std::bind(&GroundConsistencyLayer::groundCloudCallback, this, std::placeholders::_1));
+    ground_topic_,
+    std::bind(&GroundConsistencyLayer::groundCloudCallback, this, std::placeholders::_1),
+    qos);
 
   nonground_sub_ = node->create_subscription<sensor_msgs::msg::PointCloud2>(
-    nonground_topic_, qos,
-    std::bind(&GroundConsistencyLayer::nongroundCloudCallback, this, std::placeholders::_1));
+    nonground_topic_,
+    std::bind(&GroundConsistencyLayer::nongroundCloudCallback, this, std::placeholders::_1),
+    qos);
 
   RCLCPP_INFO(node->get_logger(),
     "GroundConsistencyLayer activated. Subscribed to %s and %s",

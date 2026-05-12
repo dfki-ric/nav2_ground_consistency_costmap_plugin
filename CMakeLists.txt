@@ -4,6 +4,7 @@ project(nav2_ground_consistency_costmap_plugin)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(nav2_costmap_2d REQUIRED)
+find_package(nav2_ros_common REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(tf2 REQUIRED)
@@ -26,17 +27,19 @@ target_include_directories(${PROJECT_NAME}
     $<INSTALL_INTERFACE:include>
 )
 
-target_compile_features(${PROJECT_NAME} PUBLIC cxx_std_17)
-
-ament_target_dependencies(${PROJECT_NAME}
-  rclcpp
-  nav2_costmap_2d
-  sensor_msgs
-  geometry_msgs
-  tf2
-  tf2_ros
-  tf2_geometry_msgs
-  pluginlib
+target_link_libraries(${PROJECT_NAME} PUBLIC
+  rclcpp::rclcpp
+  nav2_costmap_2d::filters
+  nav2_costmap_2d::layers
+  nav2_costmap_2d::nav2_costmap_2d_client
+  nav2_costmap_2d::nav2_costmap_2d_core
+  nav2_ros_common::nav2_ros_common
+  ${sensor_msgs_TARGETS}
+  ${geometry_msgs_TARGETS}
+  tf2::tf2
+  tf2_ros::tf2_ros
+  tf2_geometry_msgs::tf2_geometry_msgs
+  pluginlib::pluginlib
 )
 
 pluginlib_export_plugin_description_file(nav2_costmap_2d ground_consistency_layer.xml)
@@ -65,14 +68,17 @@ if(BUILD_TESTING)
 
   target_link_libraries(test_ground_consistency_layer ${PROJECT_NAME})
 
-  ament_target_dependencies(test_ground_consistency_layer
-    rclcpp
-    rclcpp_lifecycle
-    nav2_costmap_2d
-    sensor_msgs
-    geometry_msgs
-    tf2
-    tf2_ros
+  target_link_libraries(test_ground_consistency_layer
+    rclcpp::rclcpp
+    rclcpp_lifecycle::rclcpp_lifecycle
+    nav2_costmap_2d::filters
+    nav2_costmap_2d::layers
+    nav2_costmap_2d::nav2_costmap_2d_client
+    nav2_costmap_2d::nav2_costmap_2d_core
+    ${sensor_msgs_TARGETS}
+    ${geometry_msgs_TARGETS}
+    tf2::tf2
+    tf2_ros::tf2_ros
   )
 endif()
 
