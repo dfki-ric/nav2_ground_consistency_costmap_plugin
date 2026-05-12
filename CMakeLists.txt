@@ -11,6 +11,7 @@ find_package(tf2 REQUIRED)
 find_package(tf2_ros REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(pluginlib REQUIRED)
+find_package(nav2_lifecycle_manager REQUIRED)
 
 if(BUILD_TESTING)
   find_package(ament_cmake_gtest REQUIRED)
@@ -70,7 +71,7 @@ if(BUILD_TESTING)
 
   target_link_libraries(test_ground_consistency_layer
     rclcpp::rclcpp
-    rclcpp_lifecycle::rclcpp_lifecycle
+    nav2_lifecycle_manager::nav2_lifecycle_manager_core
     nav2_costmap_2d::filters
     nav2_costmap_2d::layers
     nav2_costmap_2d::nav2_costmap_2d_client
