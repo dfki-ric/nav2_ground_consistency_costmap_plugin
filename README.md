@@ -1,6 +1,6 @@
 <div align="center">
   <h1>Nav2 Ground Consistency Costmap Plugin</h1>
-  <a href="https://docs.nav2.org/tutorials/index.html">Nav2 Tutorial (Coming Soon)</a>
+  <a href="https://docs.nav2.org/tutorials/docs/navigation2_with_ground_consistency_layer.html">Nav2 Tutorial</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
   <a href="https://github.com/dfki-ric/ground_segmentation">GSeg3D Library</a>
   <span>&nbsp;&nbsp;•&nbsp;&nbsp;</span>
